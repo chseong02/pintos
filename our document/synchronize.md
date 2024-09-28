@@ -99,3 +99,65 @@ bool sema_try_down (struct semaphore *sema)
 }
 ```
 `sema_try_down` 함수는 `sema->value`가 0보다 커질 때까지 대기하는 대신 `down`을 1회 시도하고 성공/실패 여부를 반환한다. 따라서 실행 중 스레드가 Block되지 않는다.
+
+### Lock
+```c
+struct lock 
+  {
+    struct thread *holder;      /* Thread holding lock (for debugging). */
+    struct semaphore semaphore; /* Binary semaphore controlling access. */
+  };
+```
+Lock은 기본적으로 Semaphore를 기반으로 하되, Lock을 설정한 스레드와 해제하는 스레드가 동일함을 추가적으로 검증한다. 따라서 멤버 변수에 현재 해당 lock을 설정한 스레드가 무엇인지를 저장하는 `holder` 멤버 변수가 추가적으로 선언되었다.
+
+```c
+void lock_init (struct lock *lock)
+{
+  ASSERT (lock != NULL);
+
+  lock->holder = NULL;
+  sema_init (&lock->semaphore, 1);
+}
+```
+Lock을 초기화한다. 현재 Lock을 소유 중인 `holder`가 없는 상태이고 Semaphore의 값을 1인 상태로 설정한다.
+
+```c
+void lock_acquire (struct lock *lock)
+{
+  ASSERT (lock != NULL);
+  ASSERT (!intr_context ());
+  ASSERT (!lock_held_by_current_thread (lock));
+
+  sema_down (&lock->semaphore);
+  lock->holder = thread_current ();
+}
+```
+Lock을 획득하는 함수. 앞서 설명한 인터럽트 여부 확인과 더불어 현재 Lock을 보유 중인 스레드가 다시 Lock 획득을 시도하고 있지는 않은지 검사한 뒤 `sema_down`을 호출한다. 이미 해당 Lock을 다른 스레드가 소유 중일 경우 Semaphore의 값이 0일 것이므로 Semaphore가 1이 될 때까지 Block될 것이고, 소유 중이었던 스레드가 Lock 소유를 해제할 경우 현재 스레드가 Unblock되어 Lock 소유를 시도할 것이다. 소유에 성공했거나 기존 소유자가 없었을 경우 lock의 holder를 현재 스레드로 변경한다.
+
+```c
+bool lock_try_acquire (struct lock *lock)
+{
+  bool success;
+
+  ASSERT (lock != NULL);
+  ASSERT (!lock_held_by_current_thread (lock));
+
+  success = sema_try_down (&lock->semaphore);
+  if (success)
+    lock->holder = thread_current ();
+  return success;
+}
+```
+`sema_try_down`과 마찬가지로 Lock 소유를 1회 시도한 뒤 성공 여부를 반환한다.
+
+```c
+void lock_release (struct lock *lock) 
+{
+  ASSERT (lock != NULL);
+  ASSERT (lock_held_by_current_thread (lock));
+
+  lock->holder = NULL;
+  sema_up (&lock->semaphore);
+}
+```
+Lock 소유를 해제한다. `lock_acquire`와는 반대로, 해제를 시도하고 있는 스레드가 Lock을 소유했던 스레드가 맞는지를 검사한다. `lock->holder`를 초기화한 뒤 `sema_up`으로 Semaphore의 값을 다시 1로 복구한다.

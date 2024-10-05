@@ -1,4 +1,4 @@
-	```
+```
 devices/timer.c
 threads/fixed-point.h
 threads/synch.c
@@ -17,6 +17,7 @@ threads/thread.h
 핀토스가 실행된다면 가장 처음으로
 
 ### Thread
+#### `thread`
 ```c
 struct thread
   {
@@ -49,6 +50,7 @@ struct thread
 | `allelem`  | struct `list_elem`   | 모든 스레드를 포함하는 double linked list를 위한 아이템 하나                                                                                                                                               |
 | `elem`     | struct `list_elem`   | 모든 스레드를 포함하는 double linked list를 위한 아이템 하나                                                                                                                                               |
 | `magic`    | `unsigned`           | `thread` 구조체의 가장 마지막 멤버 변수로, stack overflow를 감지하는 숫자. 항상 `THREAD_MAGIC`으로 설정되어 있다. 만약 kernel stack이 커지다 thread struct 부분까지 침범하게 되면 magic 숫자가 변경되게 되고 `THREAD_MAGIC`이 아니게 되어 이를 감지할 수 있다. |
+
 pintos는 thread를 thread에 대한 정보를 나타내는 상단 코드의 `thread` 구조체와 kernel stack으로 이루어진다. thread는 이 둘을 저장하기 위해 4kB의 page를 할당받는다.
 
 ### Init
@@ -96,7 +98,24 @@ interrupt controller 초기화(TODO: 설명 추가 필요)
 16.`run_actions(argv)`
 17.`shutdown()`
 18.`thread_exit()`
-### Etc
-`struct list`
+### 자주 사용하는 구조체 
+`struct list` in `kernel/list.h`
+```c
+/* List element. */
+struct list_elem
+  {
+    struct list_elem *prev;     /* Previous list element. */
+    struct list_elem *next;     /* Next list element. */
+  };
+  
+/* List. */
+struct list
+  {
+    struct list_elem head;      /* List head. */
+    struct list_elem tail;      /* List tail. */
+  };
+```
+
+double-linked list를 구현한 구조체. `list` struct는 `list_elem` 구조체의 `head`, `tail`로 이루어져 한 list의 앞, 끝을 관리한다. `list_elem`은 리스트를 이루는 하나하나의 element의 정보를 가지는 struct로 `prev`, `next`를 통해 현재 자신의 앞 뒤로 연결된 `list_elem`의 주소를 저장한다.
+
 `struct lock`
-``

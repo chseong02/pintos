@@ -1067,3 +1067,11 @@ Timer는 OS 부팅 시부터 `ticks` 전역 변수를 통해 현재까지 흐른
   - `Semaphore`와 `Condition Variable`의 `waiters` 리스트 역시 위와 동일한 방법으로 정렬을 유지한다. 삽입이 일어나는 `sema_down`과 `cond_wait`에서 `list_insert_ordered`를 호출하여 우선순위 정렬을 유지해주고, 삭제가 일어나는 `sema_up`과 `cond_signal`에서 `list_pop_front`하여 우선순위가 가장 높은 데이터를 반환시킨다.
   - 다만 공유자원이 다른 스레드에 의해 점유되어 대기하고 있는 동안 `Priority Donation` 등의 이유로 대기하고 있던 스레드들의 우선순위가 변경될 가능성이 존재한다. 때문에 `sema_up`과 `cond_signal`에서 `list_pop_front`를 하기 전 리스트를 정렬할 필요가 있다. (`ready_list`는?)
   - `cond`는 리스트의 원소로 스레드가 아닌 `semaphore_elem`을 사용하기 때문에 이를 비교하는 비교함수를 추가로 정의해줘야 한다.
+- `lock`을 소유하고 해제할 때 일어나는 `Priority Donation`과 관련된 동작을 구현한다.
+  - `lock_acquire`를 호출했을 때 대상이 되는 `lock`을 이미 다른 스레드가 소유하고 있을 경우 자신의 우선순위를 해당 스레드에게 빌려줘야 하고, 재귀적으로 우선순위 전파가 이루어져야 한다. 이를 구현하기 위해 현재 스레드가 소유 요청을 한 `lock`에 대한 포인터인 `lock_to_acquire`, 그리고 현재 스레드가 `Priority Donation`을 받은 스레드들의 리스트인 `donors`를 `thread` 구조체에 추가하고 `lock_acquire`에서 업데이트 해준다. 그 뒤
+    ```c
+    thread_current()->lock_to_acquire->holder->priority 
+    = thread_current()->priority;
+    ```
+    와 같이 우선순위를 `donate`한다. 현재 보고 있는 스레드를 `thread_current()->lock_to_acquire->holder`로 교체하며 사전 정의된 최대 전파 깊이 `(~8)`단계만큼 전파되거나 `lock_to_acquire == NULL`일 때까지 반복하면 `Nested Donation`을 구현할 수 있다.
+  - `lock_release`가 호출될 경우 스레드는 소유중이던 `lock`을 반환함과 동시에 해당 `lock`을 이유로 `donate` 받았던 우선순위도 되돌려야 한다. 자신에게 우선순위를 `donate`해준 스레드의 리스트인 `donors`를 순회하며 해당 `lock`을 요청했던 스레드를 리스트에서 삭제한 뒤, 남아있는 스레드들의 우선순위 중 최댓값을 사용한다. 만약 `donors` 리스트가 비었거나 본 스레드의 우선순위가 바뀌어 `donate`받은 우선순위보다 높아질 시 기존 우선순위를 사용한다.

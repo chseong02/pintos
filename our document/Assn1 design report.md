@@ -1,8 +1,18 @@
-TODO: Assn1.md 내용 적당히 요약해서 앞에 넣기
 
+# Pintos Assn1 Design Report
+20200229 김경민, 20200423 성치호 
+
+
+
+## 이론적 배경
+다음은 Pintos 구현을 위한 기초적인 이론적 배경이다. 아래 코드 분석은 해당 내용을 바탕으로 한다. 
 TODO: PPT 등에 포함된 이론적인 내용 추가하기
 
+### 
+TODO: Assn1.md 내용 적당히 요약해서 앞에 넣기
 
+## Pintos 구현 분석
+### 자주 사용되는 구조체 및 함수
 #### `ptov(uintptr_t paddr)`
 ```c
 static inline void *
@@ -16,8 +26,7 @@ ptov (uintptr_t paddr)
 
 > 매개변수로 받은 physical 주소 `paddr`과 매핑되는 kernel의 가상 주소를 반환하는 함수이다.
 
-
-### 리스트 in `kernel/lish.h,list.c`
+#### 리스트 in `kernel/lish.h,list.c`
 Pintos에서는 `list_elem`, `list` 구조체 및 이를 이용한 함수를 통해 Double Linked List를 구현하였다. 해당 함수 및 구조체를 통해 구현한 Double Linked List는 리스트를 구성하는 element들이 연속된 메모리 공간에 위치하거나 dynamic allocated memory 사용을 요구하지 않는다. 하지만 만일 `A` 구조체로 이루어진 리스트를 구현하고자 하면 `A` 구조체가 멤버 변수로 `list_elem` 구조체의 변수를 포함하고 그 값을 관리해주어야만 한다. 그 이유는 뒤에서 리스트 구현을 이루는 구조체와 함수를 설명하며 차근차근 설명하고자 한다.
 
 #### `list_elem` 
@@ -32,6 +41,7 @@ struct list_elem
 
 주의할 점은 `list_elem` 구조체 자체는 실제 구현하고자 하는 리스트의 element 자체를 가지거나 가리키는 것이 아닌 해당 element의 리스트 내 **위치정보**만을 담고 있는 것이다.
 Ex. `Foo` 구조체로 이루어진 리스트를 구현하였다고 할 때, `Foo` 구조체 `foo1`의 `list_elem`은 어떤 리스트 내 `foo1`의 위치 정보만을 담고 있다.
+
 #### `list`
 ```c
 struct list 
@@ -40,9 +50,7 @@ struct list
     struct list_elem tail;      /* List tail. */
   };
 ```
-
-구현하고자 하는 리스트의 
-
+구현하고자 하는 리스트의 처음과 끝에 해당하는 `list_elem` 구조체 변수를 `head`, `tail`에 저장하는 구조체. 즉, 해당 `list` 구조체 변수를 가지고 있다면 `list_prev`, `list_next` 등의 함수를 이용하여 리스트의 처음, 또는 끝부터 그 반대편까지 리스트 전체를 조회하며 순회할 수 있다.
 
 #### `list_entry(LIST_ELEM, STRUCT, MEMBER)`
 ```c
@@ -52,16 +60,38 @@ struct list
 ```
 > `LIST_ELEM`이 가리키는 `list_elem`가 포함된 `STRUCT` 구조체 변수의 주소를 반환하는 매크로. 즉 (`LIST_ELEM`이 가리키는 `list_elem`)에 대응되는 `STRUCT` 구조체 변수 주소를 반환한다.
 
-`STRUCT`: 어떤 리스트를 이루는 구조체 (구조체 구조 그 자체)
-`LIST_ELEM`: 어떤 `STRUCT` 구조체 `a` 내에 저장된 `list_elem` 구조체 변수의 주소, 즉 리스트 내 `a`의 위치정보를 저장한 `list_elem`의 주소
-`MEMBER`: `STRUCT` 내에 `list_element` 구조체를 저장하는 변수명
+| 매개변수        | 설명                                                                                        |
+| ----------- | ----------------------------------------------------------------------------------------- |
+| `STRUCT`    | 어떤 리스트를 이루는 구조체 (구조체 구조 그 자체)                                                             |
+| `LIST_ELEM` | 어떤 `STRUCT` 구조체 `a` 내에 저장된 `list_elem` 구조체 변수의 주소, 즉 리스트 내 `a`의 위치정보를 저장한 `list_elem`의 주소 |
+| `MEMBER`    | `STRUCT` 내에 `list_element` 구조체를 저장하는 변수명                                                  |
+
+`LIST_ELEM` 구조체 변수의 `next`의 주소에서 (`STRUCT` 구조체 구조 내에서 struct 시작으로부터 `MEMBER.next`의 위치)를 빼어 `LIST_ELEM` 변수가 담긴 struct의 시작 즉, 해당 `list_elem`에 대응되는 `STRUCT` 구조체 변수의 주소를 얻게 된다.
+
+#### `list_next, list_prev`
+```c
+struct list_elem *
+list_next (struct list_elem *elem)
+{
+  ASSERT (is_head (elem) || is_interior (elem));
+  return elem->next;
+}
+
+struct list_elem *
+list_prev (struct list_elem *elem)
+{
+  ASSERT (is_interior (elem) || is_tail (elem));
+  return elem->prev;
+}
+```
+
+> 입력받은 `list_elem` 포인터가 가리키는 `list_elem` 구조체 변수의 리스트 내 뒤, 앞에 위치한 `list_elem`의 주소를 반환하는 함수
+이를 이용해 리스트를 순회할 수 있다. 
 
 
+### Kernel Initialization
 
-
-### 변수 소개
-
-### 함수 소개
+#### 함수 소개
 #### `bss_init(void)`
 ```c
 static void
@@ -121,9 +151,11 @@ paging_init (void)
 }
 ```
 
->df
+>  페이지 디렉토리, 페이지 테이블을 가상 메모리와 매핑하고 Page Directory와 Page Table에 free한 페이지를 allocate해 초기화하는 함수
 
-df
+`palloc_get_page`를 이용해 `pd`에 자유로운 페이지를 allocate한다. 해당 함수는 kernel의 init 중 일부로 매우 중요한 작업이기에 page 할당 중 실패하였을 때  패닉한다.
+page의 개수만큼 순회하며 각 페이지의 물리적 주소에 대응되는 virtual address를 구하고 이에 해당하는 페이지 디렉토리 엔트리 인덱스(`pde_idx`), 페이지 테이블 엔트리 인덱스(`pte_idx`) 을 구한다. 또한 페이지 테이블을 위한 페이지를 할당해주기도 한다.
+
 #### `read_command_line(void)`
 ```c
 static char **
@@ -137,6 +169,12 @@ read_command_line (void)
   argc = *(uint32_t *) ptov (LOADER_ARG_CNT);
   p = ptov (LOADER_ARGS);
   end = p + LOADER_ARGS_LEN;
+```
+> command arguments를 단어 단위로 잘라 그 문자열의 주소들을 리스트를 반환하는 함수
+
+`argc`에 physical 주소 `LOADER_ARG_CNT`에 저장되어 있는 argument 개수를 저장하고 `p`에는 argument들이 저장되어 있는 physical 주소 `LOADER_ARGS`의 가상 주소를 저장한다.
+
+```c
   for (i = 0; i < argc; i++) 
     {
       if (p >= end)
@@ -160,12 +198,10 @@ read_command_line (void)
 }
 ```
 
-> command arguments를 단어 단위로 잘라 그 문자열의 주소들을 리스트를 반환하는 함수
-
-`argc`에 physical 주소 `LOADER_ARG_CNT`에 저장되어 있는 argument 개수를 저장하고 `p`에는 argument들이 저장되어 있는 physical 주소 `LOADER_ARGS`의 가상 주소를 저장한다.
 `p`에서부터 시작해 `\0`를 기준으로 문자열을 나누어 생각해 `0`로 구분된 각 문자열의 시작 주소를 `argv`(list 처럼 작동)에 차례대로 저장한다. 조회 중인 주소가 최대 수치의 주소(`end`)를 넘어서면 패닉을 일으킨다.
 `argv[argc]`(끝 부분)에 `NULL`을 집어넣어 argument list의 끝을 표시한다.
 그리고 커널에 집어넣은 커맨드를 출력하고 args가 단어 단위로 저장된 `argv`를 반환한다. 
+
 
 #### `parse_options(char **argv)`
 ```c
@@ -273,7 +309,13 @@ run_actions (char **argv)
 #endif
       {NULL, 0, NULL},
     };
+```
+>매개변수로 입력 받은 argv를 순회하며 argv 내 명시된 action들을 순차적으로 수행하는 함수
 
+`action` 구조체는 수행 가능한 액션의 이름, 필요한  argument 개수, 해당 액션을 수행하기 위한 function을 저장한다.
+`actions`은 수행 가능한 action에 대응대는 `action` list로 현재로서는 `run`과 예외 처리를 위한 값인 `NULL`이 있다.
+
+```c
   while (*argv != NULL)
     {
       const struct action *a;
@@ -298,16 +340,11 @@ run_actions (char **argv)
   
 }
 ```
-
->매개변수로 입력 받은 argv를 순회하며 argv 내 명시된 action들을 순차적으로 수행하는 함수
-
-`action` 구조체는 수행 가능한 액션의 이름, 필요한  argument 개수, 해당 액션을 수행하기 위한 function을 저장한다.
-`actions`은 수행 가능한 action에 대응대는 `action` list로 현재로서는 `run`과 예외 처리를 위한 값인 `NULL`이 있다.
 매개변수로 입력받은 `argv`를 순회하며 주소가 가리키는 문자열과 `actions`의 아이템과 이름이 일치하는 것이 있는지 확인 후 있다면 해당 `action`에 명시된 argument 개수만큼 제공하였는지 확인한다. 개수가 동일하다면 함수에 해당 action에 해당되는 문자열 주소를 가리키는 argv 내 값의 주소를 해당 `action`에 해당되는 함수`action->function`의 매개변수로 두어 해당 함수를 호출해 action을 수행한다. `argv`를 순회하며 NULL 값을 만날 때까지 이를 반복한다.
 만약 `actions`에 없는 action을 요구하거나 `action`에 대한 args가 부족할 때는 패닉을 일으킨다.
 
 
-### 변수, 상수, 매크로, 구조체 
+### Thread
 #### `THREAD_MAGIC`
 ```c
 #define THREAD_MAGIC 0xcd6abf4b
@@ -325,6 +362,7 @@ enum thread_status
   };
 ```
 `thread` 구조체에서 `thread`의 상태를 나타낼 때 사용하는 열거형.
+위의 이론적 배경에서 설명하였듯 스레드는 4개의 스레드 상태를 왔다갔다하는 lifecycle을 가진다. 
 TODO: 스레드 각 상태 의미 배경지식 추가 필요
 
 #### `tid_t`
@@ -339,9 +377,9 @@ Thread를 구분하는 id를 위한 자료형(Thread identifier type)이다.
 #define PRI_DEFAULT 31                  /* Default priority. */
 #define PRI_MAX 63                      /* Highest priority. */
 ```
-스레드(`thread`)가 가질 수 있는 priority의 범위 및 기본 값을 나타내는 상수이다.  `PRI_MIN`, `PRI_MAX`는 각각 스레드의 우선순위(`thread`구조체에서 `priority`)의 하한과 상환이다. 값은 클수록 우선순위가 높은 것(더 중요한 것)이다. `PRI_DEFAULT`는 스레드 생성시(TODO: 기본 함수) 별도로 설정하지 않을 시 기본으로 설정되는 `priority` 값이다.
+스레드(`thread`)가 가질 수 있는 priority의 범위 및 기본 값을 나타내는 상수이다.  `PRI_MIN`, `PRI_MAX`는 각각 스레드의 우선순위(`thread`구조체에서 `priority`)의 하한과 상환이다. 값은 클수록 우선순위가 높은 것(더 중요한 것)이다. `PRI_DEFAULT`는 스레드 생성시 특별한 의도가 있지 않을 때 기본적으로 사용하는 `priority` 값이다.
 
-### `thread`
+### **`thread`**
 ```c
 struct thread
   {
@@ -374,6 +412,7 @@ struct thread
 | `allelem`  | struct `list_elem`   | 모든 스레드를 포함하는 double linked list를 위한 아이템 하나                                                                                                                                               |
 | `elem`     | struct `list_elem`   | 모든 스레드를 포함하는 double linked list를 위한 아이템 하나                                                                                                                                               |
 | `magic`    | `unsigned`           | `thread` 구조체의 가장 마지막 멤버 변수로, stack overflow를 감지하는 숫자. 항상 `THREAD_MAGIC`으로 설정되어 있다. 만약 kernel stack이 커지다 thread struct 부분까지 침범하게 되면 magic 숫자가 변경되게 되고 `THREAD_MAGIC`이 아니게 되어 이를 감지할 수 있다. |
+
 pintos는 thread를 thread에 대한 정보를 나타내는 상단 코드의 `thread` 구조체와 kernel stack으로 이루어진다. thread는 이 둘을 4kB의 page 내에 저장한다. 각 스레드는 4kB page 내 아래 구조와 같이 저장된다. 
 ```c
         4 kB +---------------------------------+
@@ -408,7 +447,7 @@ pintos는 thread를 thread에 대한 정보를 나타내는 상단 코드의 `th
 extern bool thread_mlfqs;
 ```
 mlfqs(Multi level feedback queue scheduler)를 사용할지 여부를 담는 전역 변수이다.
-기본 값은 false로 설정되는데 해당 값이 false라면(TODO: 누구로 인해?) 이는 round-robin scheduler(TODO: 어디서 이 변수를 참조?)를 사용하고 true라면 Multi level feedback queue scheduler를 사용한다.
+기본 값은 false로 설정되는데 해당 값이 false라면 round-robin scheduler를 사용하고 true라면 Multi level feedback queue scheduler를 사용하는 것을 의미한다. 이 값에 따라 다른 스케줄러를 사용하도록 하는 것은 Assn1에서 우리가 구현해야할 사항이다.
 해당 변수는 command-line option인 `-mlfqs` 옵션이 주어질 때,  main함수에서 init 중 `parse_options`에 의해 True로 설정된다.
 
 #### `ready_list`
@@ -427,14 +466,14 @@ static struct list all_list;
 ```c
 static struct thread *idle_thread;
 ```
-`ㅓ`
+`idle` 함수를 수행하는 스레드를 가리키는 포인터 변수. idle thread란 running될 준비가 된 스레드가 하나도 없을 때 실행되는 스레드이다. 해당 변수는 `thread_start`에서 `idle_thread`를 생성하고 이후 처음으로 `idle`을 실행해야할 스레드가 실행되었을 때 `idle`에서 초기화된다.
 
 #### `initial_thread`
 ```c
 static struct thread *initial_thread;
 ```
 처음으로 생성되고 running되는 스레드의 `thread`를 가리키는 포인터 변수
-즉 커널 실행시 처음으로 작동하는 `threads/initc.c`의 `main` 함수에 해당되는 스레드를 가리킨다.
+즉 스레드 시스템의 초기화 이후에는 커널 실행시 처음으로 작동하는 `threads/initc.c`의 `main` 함수에 해당되는 스레드를 가리킨다.
 
 #### `tid_lock`
 ```c
@@ -453,14 +492,17 @@ struct kernel_thread_frame
     void *aux;                  /* Auxiliary data for function. */
   };
 ```
+TODO: kernel thread frame 외에도 여러 개 있음.
 
 #### `idle_ticks, kernel_ticks, user_ticks`
 실제 기능을 담당하는 것이 아닌 분석을 위한 변수들이다,
 각각 idel Thread 보낸 총 tick, 커널 스레드에서 소요한 총 tick, user program에서 사용한 총 tick을 의미한다.
+
 ### `thread_ticks`
 마지막으로 yield한 이후 timer tick이 얼마나 지났는지 정하는 static 변수이다.
+주기적으로 스케줄링을 수행해야 할 때 해당 변수 값을 참고한다.
 
-### 함수 소개
+#### Thread 연관 함수
 #### `thread_init(void)`
 ```c
 void
@@ -502,10 +544,14 @@ thread_start (void)
 }
 ```
 
-> interrupt를 활성화함으로써 preemptive(선점형) 스레드 스케줄링을 시작하는 함수.
+> `idle` 스레드를 생성, 초기화하고 interrupt를 활성화하여 스케줄링을 활성화하는 함수
 
+여기서 idle thread란 ready된 다른 스레드가 존재하지 않을 때 실행되는 스레드이다.
 interrupt를 활성화함으로써 preemptive(선점형) 스레드 스케줄링을 시작하는 함수로 idle thread도 생성한다. `idle_started`라는 `semaphore`를 생성하고 초기화한다. 
-또한 `thread_create`를 통해 idle이라는 이름을 가지고 `priority`는 `PRI_MIN`으로 가장 낮은 thread를 생성한다. 이후에는 `intr_enable`을 통해 interrupts를 허용한다.  TODO: thread create 동작 방식,. sema down
+`idle_started`는 `idle` 함수가 실행되어 `idle_thread` 변수가 초기화가 올바르게 되었는지 확인하는 semaphore 변수이다. 본 함수 끝에서 `sema_down`을 하였고 본 함수를 통해 생성된 `idle`함수를 실행하는 스레드가 running시 `idle` 함수에서 `idle_thread` 값을 본인으로 변경 후 `sema_up`을 하여 `idle`함수가 정상적으로 실행되었으며 `idle_thread`가 잘 초기화 되었음을 표현한다.
+
+또한 해당 함수는 `thread_create`를 통해 idle이라는 이름을 가지고 `priority`는 `PRI_MIN`으로 가장 낮은 `idle` 함수를 `idle_started`의 주소를 인수로 사용하여 실행하는 thread를 생성한다. 
+이후에는 `intr_enable`을 통해 interrupts를 허용한다.  
 
 #### `thread_tick(void)`
 ```c
@@ -606,6 +652,7 @@ thread_create (const char *name, int priority,
 
 각 스레드가 할당받은 메모리 중 스택의 최상단부터 `alloc_frame`을 이용해  `kernel_thread_frame`, `switch_entry_frame`, `switch_threads_frame` 공간을 차례로 할당한다. 또한 각 frame의 정보를 채워 넣어 초기화한다.
 스레드 생성 및 초기화가 완료되었으므로 새로 생성한 스레드를 unblock한 뒤 스레드의 tid를 반환한다.
+
 #### `thread_block(void)`
 ```c
 void
@@ -622,6 +669,7 @@ thread_block (void)
 > 현재 실행 중인 스레드의 `status`를 `THREAD_BLOCKED`로 변경하여 블록한 뒤 `schedule()`를 통해 스케줄링하는 함수
 
 `!intr_context()`를 통해 현재 external interrupt를 처리 중이 아님을 확인한다. 또한 해당 함수 실행을 위해서는 interrupt가 비활성화되어 있어야 한다.
+
 #### `thread_unblock(struct thread *t)`
 ```c
 void
@@ -640,7 +688,7 @@ thread_unblock (struct thread *t)
 ```
 > 입력받은 매개변수가 가리키는 `thread`를 unblock시키는 함수
 
-interrupt를 비활성화한 뒤 입력받은 스레드를 다시 `THREAD_READY`상태의 스레드 리스트인 `ready_list`에 집어넣고 스레드의 `status`를 `THREAD_READY`로 변견한 뒤 원래 interrupt 레벨로 복구한다.
+interrupt를 비활성화한 뒤 입력받은 스레드를 다시 `THREAD_READY`상태의 스레드 리스트인 `ready_list`에 집어넣고 스레드의 `status`를 `THREAD_READY`로 변경한 뒤 원래 interrupt 레벨로 복구한다.
 
 #### `thread_name`, `thread_tid`
 
@@ -669,12 +717,96 @@ thread_current (void)
 
 추가로 현재 실행 중인 것이 정말 올바른 형식의 스레드인지 실행 중인 스레드가 맞는지 등의 정합성 검사를 포함한다.
 
-
+#### `thread_exit`
 
 TODO: 앞 내용 미완성
 
 
-## Scheduler
+### Kernel Main
+`threads/init.c`의 `main`는 핀토스 실행시 가장 처음으로 실행되는 함수이자 핀토스 프로그램 그 자체이다. 다른 파일의 여러 함수들을 호출하여 커널의 초기화부터 command 실행까지 이루어지게 된다.
+
+```c
+int
+main (void)
+{
+  char **argv;
+
+  /* Clear BSS. */  
+  bss_init ();
+
+  /* Break command line into arguments and parse options. */
+  argv = read_command_line ();
+  argv = parse_options (argv);
+```
+`bss_init`을 통해 초기화되지 않은 non-local varaieble, BSS를 0으로 초기화한다. 이후 `read_command_line`을 통해 핀토스 실행과 함께 입력받은 arguments를 단어 단위로 잘라 그 문자열들의 리스트를 반환 받는다. 반환 받은 문자열 리스트를 인수로 하여  `parse_options`하면 입력받은 문자열 리스트를 순회하며 각 문자열에 맞는, 즉 각 옵션에 해당하는 행위를 수행한다. 주로 config 변수를 조절한다. 옵션이 아닌 첫번째 argument(커널이 어떤 task를 수행해야할지에 대한)를 반환한다.
+
+```c
+  /* Initialize ourselves as a thread so we can use locks,
+     then enable console locking. */
+  thread_init ();
+  console_init ();  
+
+  /* Greet user. */
+  printf ("Pintos booting with %'"PRIu32" kB RAM...\n",
+          init_ram_pages * PGSIZE / 1024);
+
+  /* Initialize memory system. */
+  palloc_init (user_page_limit);
+  malloc_init ();
+  paging_init ();
+```
+`thread_init`을 통해 스레드 시스템을 초기화한다. `thread_init`에서는 `allocate_tid`에 사용하는 lock인 `tid_lock`을 비롯해 ready한 스레드 리스트 `ready_list`, 모든 스레드 리스트 `all_list`를 초기화하고 main 함수를 실행 중인 현재 스레드를 `initial_thread`로 지정하고 이에 맞게 스레드 연관 상태를 초기화해준다.
+이후에는 `palloc_init`, `malloc_init`,`paging_init`을 통해 메모리 시스템을 초기화해준다.
+
+```c
+  /* Segmentation. */
+#ifdef USERPROG
+  tss_init ();
+  gdt_init ();
+#endif
+
+  /* Initialize interrupt handlers. */
+  intr_init ();
+  timer_init ();
+  kbd_init ();
+  input_init ();
+#ifdef USERPROG
+  exception_init ();
+  syscall_init ();
+#endif
+```
+User Program을 위한 기본 설정을 진행한 뒤, 
+
+
+```c
+  /* Start thread scheduler and enable interrupts. */
+  thread_start ();
+  serial_init_queue ();
+  timer_calibrate ();
+
+#ifdef FILESYS
+  /* Initialize file system. */
+  ide_init ();
+  locate_block_devices ();
+  filesys_init (format_filesys);
+#endif
+```
+
+
+```c
+  printf ("Boot complete.\n");
+  
+  /* Run actions specified on kernel command line. */
+  run_actions (argv);
+
+  /* Finish up. */
+  shutdown ();
+  thread_exit ();
+}
+```
+
+
+### Scheduler
 
 ```c
 /* Schedules a new process.  At entry, interrupts must be off and
@@ -765,13 +897,13 @@ void thread_unblock (struct thread *t)
   intr_set_level (old_level);
 }
 ```
-또한 현재 스레드를 `run queue`에 넣는 작업이 필요한 `thread_yield`, `thread_unblock` 등과 같은 경우에는 일괄적으로 `list_push_back (&ready_list, &t->elem);`를 이용하여 `run queue` 리스트의 뒤쪽 끝에다 `push`하고 있다. 위의 `pop` 동작과 연관지어 봤을 때 현재 `run queue`는 우선순위 없이 단일 큐를 이용해 먼저 `push`된 스레드가 먼저 `pop`되는 `round-robin` 형식을 사용하고 있는 것을 알 수 있다. 이를 우선순위가 높은 스레드가 먼저 `pop`되도록 `priority scheduler`로 변경하는 것이 이번 Assn1의 목표 중 하나이다.
+또한 현재 스레드를 `run queue`에 넣는 작업이 필요한 `thread_yield`, `thread_unblock` 등과 같은 경우에는 일괄적으로 `list_push_back (&ready_list, &t->elem);`를 이용하여 `run queue` 리스트의 뒤쪽 끝에다 `push`하고 있다. 위의 `pop` 동작과 연관지어 봤을 때 현재 `run queue`는 우선순위 없이 단일 큐를 이용해 먼저 `push`된 스레드가 먼저 `pop`되는 `round-robin` 형식을 사용하고 있는 것을 알 수 있다. 이를 우선순위가 높은 스레드가 먼저 `pop`되도록 `priority scheduler`로 변경하는 것이 이번 Assn1의 목표 중 하나이다.`
 
 
-## Synchronization Variables
+### Synchronization Variables
 멀티스레드 환경에서 Concurrency를 보장하기 위해 필요한 Semaphores, Locks, Condition Variables 구조체에 대한 정의는 `/threads/synch.h`, `/threads/synch.c`에 정의되어 있다.
 
-### Semaphore
+#### Semaphore
 ```c
 /* A counting semaphore. */
 struct semaphore 
@@ -999,7 +1131,8 @@ void cond_broadcast (struct condition *cond, struct lock *lock)
 해당 스레드가 Lock을 보유하고 있고 인터럽트 중이 아닐 경우, `cond`의  Semaphore list에 있는 모든 Semaphore를 up하여 해당 Conditional variable에 의해 `wait` 상태에 있던 스레드들을 모두 깨운다.
 
 
-## Timer
+
+### Timer
 
 ```c
 void timer_sleep (int64_t ticks) 
@@ -1038,9 +1171,9 @@ int64_t timer_ticks (void)
 ```
 Timer는 OS 부팅 시부터 `ticks` 전역 변수를 통해 현재까지 흐른 시간을 갱신하여 관리하며, 이를 이용해 `timer_ticks`를 첫 번째 호출한 시점과 두 번째 호출한 시점의 `ticks` 값의 차이를 계산하여 경과 시간을 알아내는 등의 동작을 구현할 수 있다.
 
-# Design
+## Design
 
-## Alarm Clock
+### Alarm Clock
 
 `busy waiting` 방식의 `timer_sleep`을 개선하기 위해선 스레드를 block시킨 뒤 매 틱마다 `sleep`이 만료되었는지 확인해주어야 한다. 이를 위해 다음과 같이 구현 계획을 세웠다.
 - `thread` 구조체에 `sleep`이 해제되어야 할 시각인 `wakeup_tick` 변수를 멤버로 추가한다.
@@ -1051,7 +1184,7 @@ Timer는 OS 부팅 시부터 `ticks` 전역 변수를 통해 현재까지 흐른
 - `sleep_list`가 정렬된 상태로 관리될 경우 `sleep`이 만료된 스레드를 탐색할 시 전체 순회를 하는 것이 아닌 리스트의 앞쪽만 확인하면 되므로, 삽입에 `O(n)`, 삭제에 `O(1)`의 시간복잡도로 개선이 가능하다. 해당 동작은 `list`의 `list_insert_ordered`와 `list_pop_front`를 이용해 구현 가능하다.
   - `list_insert_ordered`에서 아이템들 간 대소비교를 판단할 때 `list_less_func` 비교함수를 정의해줘야 하는데, 여기서는 각 스레드들의 `wakeup_tick`간의 비교가 이루어지도록 비교함수를 정의해줘야 한다.
 
-## Priority Scheduling
+### Priority Scheduling
 
 현재 구현되어있는 `round-robin scheduler`는 스레드의 우선순위를 고려하지 않고 `ready_list`에 들어간 순서대로 스케줄되고 있으므로 이를 `Priority Scheduler`로 개선해야 한다. 고려해야 하는 상황은 크게 다음과 같다.
 - 스레드는 언제든 우선순위가 변경될 수 있으며, 만약 실행 중인 스레드의 우선순위가 변경되어  `ready_list`에 들어있는 스레드들 중 가장 높은 우선순위보다 낮아질 시 곧바로 `thread_yield`를 해줘야 한다.

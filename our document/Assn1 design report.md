@@ -370,7 +370,7 @@ struct thread
 | `status`   | enum `thread_status` | 스레드의 현재 상태                                                                                                                                                                               |
 | `name`     | `char`               | 디버깅용 스레드 이름                                                                                                                                                                              |
 | `stack`    | `uint8_t`            | 해당 스레드의 stack을 가리키는 포인터<br>- 다른 스레드로 전환될 시 stack pointer를 해당 변수에 저장하여 이후에 thread가 다시 실행될 때 해당 pointer를 이용한다.                                                                             |
-| `priority` | `int`                | 스레드 우선 순위(숫자가 클수록 높은 우선순위)                                                                                                                                                               |
+| `priority` | `int`                | 스레드 우선순위(숫자가 클수록 높은 우선순위)                                                                                                                                                               |
 | `allelem`  | struct `list_elem`   | 모든 스레드를 포함하는 double linked list를 위한 아이템 하나                                                                                                                                               |
 | `elem`     | struct `list_elem`   | 모든 스레드를 포함하는 double linked list를 위한 아이템 하나                                                                                                                                               |
 | `magic`    | `unsigned`           | `thread` 구조체의 가장 마지막 멤버 변수로, stack overflow를 감지하는 숫자. 항상 `THREAD_MAGIC`으로 설정되어 있다. 만약 kernel stack이 커지다 thread struct 부분까지 침범하게 되면 magic 숫자가 변경되게 되고 `THREAD_MAGIC`이 아니게 되어 이를 감지할 수 있다. |
@@ -699,7 +699,7 @@ static void schedule (void)
   thread_schedule_tail (prev);
 }
 ```
-`/threads/thread.c`에 정의된 `schedule` 함수는 현재 실행중인 `cur` 스레드와 다음으로 실행할 `next` 스레드를 `switch_threads`를 통해 컨텍스트 스위칭한다. 
+`/threads/thread.c`에 정의된 `schedule` 함수는 현재 실행중인 `cur` 스레드와 다음으로 실행할 `next` 스레드를 `switch_threads`를 통해 컨텍스트 스위칭한다. 현재 스레드의 작업을 마무리하고 `ready_list`에서 새로운 스레드를 `Running` 상태로 만들어야 하는 `thread_yield`, `thread_block`, `thread_exit`에서 호출한다.
 
 `switch_threads` 함수는 `switch.S`에 정의되어있는 x86 어셈블리로 작성된 함수로, 두 스레드의 레지스터와 스택 공간 정보를 뒤바꾼 뒤 바꾸기 이전 기존 스레드의 정보를 반환한다.
 ```c
@@ -845,7 +845,7 @@ void sema_up (struct semaphore *sema)
 
 따라서 본 코드에선 `sema_down`을 시도하는 스레드를 Block하고 `semaphore` 구조체 내부의 스레드 리스트에서 Block된 스레드들을 관리한다. 이 스레드들은 `sema_up`이 호출될 시 일괄적으로 Unblock된다.
 
-OS에서 인터럽트 처리 중 `sema_down`에 의한 스레드 Block이 발생할 경우 OS가 멈추는 등 예기치 못한 결과를 일으킬 수 있으므로 인터럽트 중에는 `sema_down`이 실행되지 않도록 `ASSERT`문을 통해 검사한다. 또한 유사한 이유로 스레드 리스트를 변경하는 중 인터럽트가 발생하여 예기치 못한 동작이 일어날 가능성이 존재하므로 스레드 리스트를 변경하는 도중에는 인터럽트를 비활성화시켜 Atomic하게 실행되도록 한다.
+OS에서 인터럽트 처리 중 `sema_down`에 의한 스레드 Block이 발생할 경우 Race Condition에 의해 OS가 멈추는 등 예기치 못한 결과를 일으킬 수 있으므로 인터럽트 중에는 `sema_down`이 실행되지 않도록 `ASSERT`문을 통해 검사한다. 또한 유사한 이유로 스레드 리스트를 변경하는 중 인터럽트가 발생하여 예기치 못한 동작이 일어날 가능성이 존재하므로 스레드 리스트를 변경하는 도중에는 인터럽트를 비활성화시켜 Atomic하게 실행되도록 한다.
 
 ```c
 bool sema_try_down (struct semaphore *sema) 
@@ -999,7 +999,6 @@ void cond_broadcast (struct condition *cond, struct lock *lock)
 해당 스레드가 Lock을 보유하고 있고 인터럽트 중이 아닐 경우, `cond`의  Semaphore list에 있는 모든 Semaphore를 up하여 해당 Conditional variable에 의해 `wait` 상태에 있던 스레드들을 모두 깨운다.
 
 
-
 ## Timer
 
 ```c
@@ -1039,5 +1038,32 @@ int64_t timer_ticks (void)
 ```
 Timer는 OS 부팅 시부터 `ticks` 전역 변수를 통해 현재까지 흐른 시간을 갱신하여 관리하며, 이를 이용해 `timer_ticks`를 첫 번째 호출한 시점과 두 번째 호출한 시점의 `ticks` 값의 차이를 계산하여 경과 시간을 알아내는 등의 동작을 구현할 수 있다.
 
+# Design
 
+## Alarm Clock
 
+`busy waiting` 방식의 `timer_sleep`을 개선하기 위해선 스레드를 block시킨 뒤 매 틱마다 `sleep`이 만료되었는지 확인해주어야 한다. 이를 위해 다음과 같이 구현 계획을 세웠다.
+- `thread` 구조체에 `sleep`이 해제되어야 할 시각인 `wakeup_tick` 변수를 멤버로 추가한다.
+- `sleep_list` 리스트를 `thread.c`에 선언한 뒤 `thread_init`에서 `list_init(&sleep_list)`를 통해 초기화해준다.
+- `timer_sleep` 함수가 호출될 시, 현재 스레드 구조체 (`thread_current`)를 `sleep_list`에 추가한 뒤 현재 스레드를 `block`한다.
+  - 인터럽트 동작 중 스레드를 `block`하는 동작은 race condition을 일으킬 수 있으므로 인터럽트를 해제해줘야 한다.
+- 매 틱마다 `timer.c`의 `timer_interrupt` 혹은 `thread.c`의 `thread_tick` 함수가 호출될 때마다 `sleep_list`를 순회하며, 현재 틱이 `wakeup_tick`을 지난 스레드들을 `unblock`시키고 `ready_list` 리스트로 이동시킨다.
+- `sleep_list`가 정렬된 상태로 관리될 경우 `sleep`이 만료된 스레드를 탐색할 시 전체 순회를 하는 것이 아닌 리스트의 앞쪽만 확인하면 되므로, 삽입에 `O(n)`, 삭제에 `O(1)`의 시간복잡도로 개선이 가능하다. 해당 동작은 `list`의 `list_insert_ordered`와 `list_pop_front`를 이용해 구현 가능하다.
+  - `list_insert_ordered`에서 아이템들 간 대소비교를 판단할 때 `list_less_func` 비교함수를 정의해줘야 하는데, 여기서는 각 스레드들의 `wakeup_tick`간의 비교가 이루어지도록 비교함수를 정의해줘야 한다.
+
+## Priority Scheduling
+
+현재 구현되어있는 `round-robin scheduler`는 스레드의 우선순위를 고려하지 않고 `ready_list`에 들어간 순서대로 스케줄되고 있으므로 이를 `Priority Scheduler`로 개선해야 한다. 고려해야 하는 상황은 크게 다음과 같다.
+- 스레드는 언제든 우선순위가 변경될 수 있으며, 만약 실행 중인 스레드의 우선순위가 변경되어  `ready_list`에 들어있는 스레드들 중 가장 높은 우선순위보다 낮아질 시 곧바로 `thread_yield`를 해줘야 한다.
+- `Semaphore`, `Lock`, `Condition Variable`에 의해 관리되는 공유자원에 대한 접근 역시 우선순위에 따라 관리되어야 한다.
+- 낮은 우선순위의 스레드 `L`이 소유 중인 `lock`을 높은 우선순위의 스레드 `H`가 요청한 상황에서 `L`보다 우선순위가 높은 다른 스레드 `M`에게 우선순위에서 밀려 `lock`을 전해주지 못하는 `Priority Inversion` 현상이 발생할 수 있다. 이는 `H`가 `L`에게 `lock`을 요청할 때 일시적으로 자신의 우선순위를 양도해주는 `Priority Donation`을 구현함으로써 해결할 수 있다.
+  - 낮은 우선순위의 스레드가 여러 개의 스레드에게서 우선순위를 양도받을 수 있다 (`Multiple Donation`). 이때 양도받은 스레드는 양도받은 우선순위 중 가장 높은 것을 적용한다.
+  - `Priority Donation`이 연쇄적으로 일어날 수 있다 (`Nested Donation`). 이때 연쇄적으로 우선순위를 양도받은 스레드들은 모두 가장 높은 `Prioriry Donor`의 우선순위를 받는다.
+
+이를 위해 다음과 같이 구현 계획을 세웠다.
+- 실행 중인 스레드의 우선순위가 대기 중인 스레드의 우선순위와 역전될 수 있는 `thread_create`와 `thread_set_priority` 함수의 마지막에 현재 스레드를 우선순위에 따라 `thread_yield`할 것인지 판단하는 로직이 추가되어야 한다.
+- `ready_list` 역시 `sleep_list`와 유사하게 스레드 우선순위를 기준으로 정렬된 상태로 관리되어야 한다. 이를 위해 새로운 `list_less_func`을 정의하여 스레드의 `priority`에 따른 비교 함수를 작성한 뒤, 기존에 `ready_list`에 스레드를 추가하던 `thread_unblock`, `thread_yield`의 `list_push_back` 함수 호출을 `list_insert_ordered`로 변경한다.
+- `Semaphore`와 `Condition Variable`의 스레드 관리 로직을 변경한다. `Lock`의 경우 `Semaphore`의 로직 외에 스레드 우선순위가 관여하는 부분이 없으므로 변경하지 않는다.
+  - `Semaphore`와 `Condition Variable`의 `waiters` 리스트 역시 위와 동일한 방법으로 정렬을 유지한다. 삽입이 일어나는 `sema_down`과 `cond_wait`에서 `list_insert_ordered`를 호출하여 우선순위 정렬을 유지해주고, 삭제가 일어나는 `sema_up`과 `cond_signal`에서 `list_pop_front`하여 우선순위가 가장 높은 데이터를 반환시킨다.
+  - 다만 공유자원이 다른 스레드에 의해 점유되어 대기하고 있는 동안 `Priority Donation` 등의 이유로 대기하고 있던 스레드들의 우선순위가 변경될 가능성이 존재한다. 때문에 `sema_up`과 `cond_signal`에서 `list_pop_front`를 하기 전 리스트를 정렬할 필요가 있다. (`ready_list`는?)
+  - `cond`는 리스트의 원소로 스레드가 아닌 `semaphore_elem`을 사용하기 때문에 이를 비교하는 비교함수를 추가로 정의해줘야 한다.

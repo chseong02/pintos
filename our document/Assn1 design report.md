@@ -1195,12 +1195,12 @@ Timer는 OS 부팅 시부터 `ticks` 전역 변수를 통해 현재까지 흐른
 
 이를 위해 다음과 같이 구현 계획을 세웠다.
 - 실행 중인 스레드의 우선순위가 대기 중인 스레드의 우선순위와 역전될 수 있는 `thread_create`와 `thread_set_priority` 함수의 마지막에 현재 스레드를 우선순위에 따라 `thread_yield`할 것인지 판단하는 로직이 추가되어야 한다.
-- `ready_list` 역시 `sleep_list`와 유사하게 스레드 우선순위를 기준으로 정렬된 상태로 관리되어야 한다. 이를 위해 새로운 `list_less_func`을 정의하여 스레드의 `priority`에 따른 비교 함수를 작성한 뒤, 기존에 `ready_list`에 스레드를 추가하던 `thread_unblock`, `thread_yield`의 `list_push_back` 함수 호출을 `list_insert_ordered`로 변경한다.
+- `ready_list` 역시 `sleep_list`와 유사하게 스레드 우선순위를 기준으로 내림차순 정렬된 상태로 관리되어야 한다. 이를 위해 새로운 `list_less_func`을 정의하여 스레드의 `priority`에 따른 비교 함수를 작성한 뒤, 기존에 `ready_list`에 스레드를 추가하던 `thread_unblock`, `thread_yield`의 `list_push_back` 함수 호출을 `list_insert_ordered`로 변경한다.
 - `Semaphore`와 `Condition Variable`의 스레드 관리 로직을 변경한다. `Lock`의 경우 `Semaphore`의 로직 외에 스레드 우선순위가 관여하는 부분이 없으므로 변경하지 않는다.
   - `Semaphore`와 `Condition Variable`의 `waiters` 리스트 역시 위와 동일한 방법으로 정렬을 유지한다. 삽입이 일어나는 `sema_down`과 `cond_wait`에서 `list_insert_ordered`를 호출하여 우선순위 정렬을 유지해주고, 삭제가 일어나는 `sema_up`과 `cond_signal`에서 `list_pop_front`하여 우선순위가 가장 높은 데이터를 반환시킨다.
-  - 다만 공유자원이 다른 스레드에 의해 점유되어 대기하고 있는 동안 `Priority Donation` 등의 이유로 대기하고 있던 스레드들의 우선순위가 변경될 가능성이 존재한다. 때문에 `sema_up`과 `cond_signal`에서 `list_pop_front`를 하기 전 리스트를 정렬할 필요가 있다. (`ready_list`는?)
+  - 다만 공유자원이 다른 스레드에 의해 점유되어 대기하고 있는 동안 `Priority Donation` 등의 이유로 대기하고 있던 스레드들의 우선순위가 변경될 가능성이 존재한다. 때문에 `sema_up`과 `cond_signal`에서 `list_pop_front`를 하기 전 리스트를 정렬할 필요가 있다.
   - `cond`는 리스트의 원소로 스레드가 아닌 `semaphore_elem`을 사용하기 때문에 이를 비교하는 비교함수를 추가로 정의해줘야 한다.
-- `lock`을 소유하고 해제할 때 일어나는 `Priority Donation`과 관련된 동작을 구현한다.
+- `lock`을 요청하고 해제할 때 일어나는 `Priority Donation`과 관련된 동작을 구현한다.
   - `lock_acquire`를 호출했을 때 대상이 되는 `lock`을 이미 다른 스레드가 소유하고 있을 경우 자신의 우선순위를 해당 스레드에게 빌려줘야 하고, 재귀적으로 우선순위 전파가 이루어져야 한다. 이를 구현하기 위해 현재 스레드가 소유 요청을 한 `lock`에 대한 포인터인 `lock_to_acquire`, 그리고 현재 스레드가 `Priority Donation`을 받은 스레드들의 리스트인 `donors`를 `thread` 구조체에 추가하고 `lock_acquire`에서 업데이트 해준다. 그 뒤
     ```c
     thread_current()->lock_to_acquire->holder->priority 
@@ -1208,3 +1208,54 @@ Timer는 OS 부팅 시부터 `ticks` 전역 변수를 통해 현재까지 흐른
     ```
     와 같이 우선순위를 `donate`한다. 현재 보고 있는 스레드를 `thread_current()->lock_to_acquire->holder`로 교체하며 사전 정의된 최대 전파 깊이 `(~8)`단계만큼 전파되거나 `lock_to_acquire == NULL`일 때까지 반복하면 `Nested Donation`을 구현할 수 있다.
   - `lock_release`가 호출될 경우 스레드는 소유중이던 `lock`을 반환함과 동시에 해당 `lock`을 이유로 `donate` 받았던 우선순위도 되돌려야 한다. 자신에게 우선순위를 `donate`해준 스레드의 리스트인 `donors`를 순회하며 해당 `lock`을 요청했던 스레드를 리스트에서 삭제한 뒤, 남아있는 스레드들의 우선순위 중 최댓값을 사용한다. 만약 `donors` 리스트가 비었거나 본 스레드의 우선순위가 바뀌어 `donate`받은 우선순위보다 높아질 시 기존 우선순위를 사용한다.
+  - `Priority Donation`이 일어날 시 `ready_list`의 정렬 상태가 깨질 가능성이 있으므로 호출 시마다 추가적인 정렬이 필요하다.
+
+### 4.4BSD Scheduler
+
+실행 시 `cmd` 옵션에서 `-mlfqs` 옵션을 사용 시 기존 스케줄러 대신 `4.4BSD Scheduler`를 사용한다. 해당 스케줄러는 실시간으로 각 스레드마다 CPU 사용 시간 등을 계산하여 우선순위를 계산한 뒤 이를 바탕으로 스케줄링을 수행한다. 해당 스케줄러는 상술한 `Priority Donation`을 사용하지 않는다.
+
+`thread` 구조체에 추가해야 할 멤버 변수들에 대한 정보는 다음과 같다.
+
+|Variable|Type|Range|Default|Calculation|Refresh rate|
+|--|--|--|--|--|--|
+|`nice`(ness)|`int`|-20 ~ 20|0|`thread_set_nice()`|manual|
+|`priority`|`int`|`PRI_MIN`(0) ~ `PRI_MAX`(63)|`PRI_DEFAULT`(31)|`PRI_MAX - (recent_cpu / 4) - (nice * 2)`|4 Ticks|
+|`recent_cpu`|`fixed-point`|any|0|`(2*load_avg)/(2*load_avg + 1) * recent_cpu + nice`|1 sec|
+|`load_avg`|`fixed-point`|0 ~|0|`(59/60)*load_avg + (1/60)*ready_threads`|1 sec|
+
+`nice`는 다른 스레드에게 얼마나 CPU 자원 양도를 잘 하는지에 대한 정도, `recent_cpu`는 해당 스레드가 최근 사용한 CPU 시간, `load_avg`는 최근 1분간 `ready`와 `running`중인 스레드의 수의 평균을 나타낸다.
+
+4틱마다 `priority`를 갱신해주고, 1초마다 `recent_cpu`와 `load_avg`를 재계산해주는 로직은 `timer_interrupt` 함수를 수정하여 구현 가능한데, OS 부팅 시부터 소요된 틱을 카운트하는 `ticks`가 4의 배수, 혹은 `TIMER_FREQ`의 배수가 될 때마다 특정 로직을 수행하도록 구현할 수 있다. 또한 매 틱마다 현재 실행중인 스레드의 `recent_cpu`를 1 증가시키는 로직도 포함되어야 한다. 해당 연산들은 스레드의 우선순위와 스케줄링에 직접적인 영향을 미치므로 인터럽트를 비활성화하여 atomic하게 실행되도록 해야 한다.
+
+현재 `thread.h`에 advanced scheduler와 관련된 함수가 4개 정의되어 있지만 구현은 되어 있지 않다. 구현해야 할 기능은 다음과 같다.
+- `thread_get_nice`: 현재 스레드의 `nice` 값을 반환한다.
+- `thread_set_nice`: 현재 스레드의 `nice` 값을 파라미터의 새 값으로 적용한 후 이를 바탕으로 `priority`를 갱신한다. 갱신 후 스레드의 우선순위가 다른 스레드보다 낮아졌을 시 `thread_yield`한다.
+- `thread_get_recent_cpu`: 현재 스레드의 `recent_cpu`에 100배 한 값을 반올림하여 반환한다.
+- `thread_get_load_avg`: 현재 스레드의 `load_avg`에 100배 한 값을 반올림하여 반환한다.
+
+### Fixed-Point Real Arithmetic
+`load_avg`와 `recent_cpu`는 실수 값을 가지는데, 일반적으로 사용되는 floating-point number는 연산이 느려 커널의 성능에 악영향을 줄 수 있기 때문에 고정 소수점 표기 방식을 이용한다. fixed-point number는 다음과 같이 표현된다.
+```
+0 00000000000000000 00000000000000
+| |    Decimal    | | Fractional |
+| +---(17 bits)---+ +-(14 bits)--+
+sign
+```
+
+이를 바탕으로 Fixed-Point number 간의 연산을 정의할 수 있다.
+
+|Function|Expression|
+|--|--|
+|`f`|`1 << 14`|
+|int to fp|`n * f`|
+|fp to int (rounding toward zero)|`x / f`|
+|fp to int (rounding to nearest)|`(x + f / 2) / f` (x >= 0), `(x - f / 2) / f` (x <= 0)|
+|add fp, fp|`x + y`|
+|sub fp, fp|`x - y`|
+|add fp, int|`x + n * f`|
+|sub fp, int|`x - n * f`|
+|mul fp, fp|`((int64_t) x) * y / f`|
+|mul fp, int|`x * n`|
+|div fp, fp|`((int64_t) x) * f / y`|
+|div fp, int|`x / n`|
+

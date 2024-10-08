@@ -457,7 +457,6 @@ enum thread_status
 ```
 `thread` 구조체에서 `thread`의 상태를 나타낼 때 사용하는 열거형.
 위의 이론적 배경에서 설명하였듯 스레드는 4개의 스레드 상태를 왔다갔다하는 lifecycle을 가진다. 
-TODO: 스레드 각 상태 의미 배경지식 추가 필요
 
 #### `tid_t`
 ```c
@@ -964,6 +963,7 @@ next_thread_to_run (void)
 > 다음에 어떤 스레드를 실행하게 스케줄할지 결정하여 반환하는 함수
 ready된 스레드를 모아둔 `ready_list`가 비어 있다면 현재 ready된 스레드가 하나도 없으므로 `idle_thread`를 반환하고 비어있지 않다면 `ready_list` 큐의 pop 된 스레드를 반환한다. 즉 `ready_list`에 들어온 순서대로 선입선출 순서로 반환하게 될 것이다.
 
+
 #### `thread_schedule_tail`
 ```c
 void
@@ -1010,6 +1010,8 @@ schedule (void)
   thread_schedule_tail (prev);
 }
 ```
+> 다음에 실행할 스레드를 결정하고 그 스레드를 스케줄하는 함수
+먼저 해당 함수는 반드시 interrupt가 비활성화된 상태, 현재 해당 함수를 실행하는 스레드가 `THREAD_RUNNING`이 아닌 다른 상태여야만 한다. `next_thread_to_run`을 통해 다음에 실행해야할 스레드가 무엇일지를 얻는다. 그리고 이렇게 얻은 스레드가 현재 스레드가 아니라면 `switch_threads`를 통해 해당 스레드로 switch하고 `thread_schedule_tail`을 호출한다.
 
 #### `allocate_tid`
 ```c
@@ -1029,6 +1031,73 @@ allocate_tid (void)
 > 새로 생성한 스레드를 위한 `tid`를 반환하는 함수
 먼저 tid는 1부터 값을 1씩 증가해나가므로 모든 스레드는 서로 다른 tid를 가지며 늦게 생성됨에 따라 tid 값이 1씩 증가한다. static 변수 `next_tid`를 통해 다음 스레드를 위한 tid를 저장한다. 또한 현재 스레드를 위한 tid를 결정한 이후 next_tid를 1 증가시킨다.
 마지막으로 이렇게 `tid`를 할당하고 `next_tid`를 변형하는 작업을 수행하는 동안 다른 스레드에서 해당 함수를 실행하지 못하게 하기 위해 lock `tid_lock`을 사용한다. 왜냐하면 여러 스레드가 함께 함수를 호출하면 같은 `tid`가 할당될 가능성이 있기 때문이다.
+
+### Switch
+switch thread에 대한 실질적인 코드는 대부분 `threads/switch.S`에 구현되어 있고 `threads/switch.h`는 이에 대한 interface만을 포함하고 있다. 
+
+#### `switch_threads_frame`
+```c
+struct switch_threads_frame 
+  {
+    uint32_t edi;               /*  0: Saved %edi. */
+    uint32_t esi;               /*  4: Saved %esi. */
+    uint32_t ebp;               /*  8: Saved %ebp. */
+    uint32_t ebx;               /* 12: Saved %ebx. */
+    void (*eip) (void);         /* 16: Return address. */
+    struct thread *cur;         /* 20: switch_threads()'s CUR argument. */
+    struct thread *next;        /* 24: switch_threads()'s NEXT argument. */
+  };
+```
+함수 `switch_threads`을 수행하는데 사용될 stack frame이다. 해당 구조체 변수는 각 `thread`의 `stack`에 다른 stack frame 들과 함께 저장되어 있다. 또한 이는 `thread_create`에서 초기화된다.
+`switch_thread`를 수행할 때 저장할 현재 스레드의 몇몇 레지스터 값, `switch_thread`에서 사용할 매개변수인 switch 전 스레드 포인터, switch 이후 스레드 포인터를 포함한다.
+
+#### `switch_threads`
+```c
+struct thread *switch_threads (struct thread *cur, struct thread *next);
+```
+> 현재  실행 중인 스레드 `cur`에 대한 정보를 저장하고 `next`가 가리키는 스레드를 실행하도록 변경하고 관련 정보를 복구하는 함수
+
+```assembly
+.globl switch_threads
+.func switch_threads
+switch_threads:
+	# Save caller's register state.
+	#
+	# Note that the SVR4 ABI allows us to destroy %eax, %ecx, %edx,
+	# but requires us to preserve %ebx, %ebp, %esi, %edi.  See
+	# [SysV-ABI-386] pages 3-11 and 3-12 for details.
+	#
+	# This stack frame must match the one set up by thread_create()
+	# in size.
+	pushl %ebx
+	pushl %ebp
+	pushl %esi
+	pushl %edi
+```
+`pushl`을 통해 현재 스레드의 `switch_threads_frame`의 위치에 4개의 레지스터 값들을 저장한다. 
+
+```assembly
+	# Get offsetof (struct thread, stack).
+.globl thread_stack_ofs
+	mov thread_stack_ofs, %edx
+
+	# Save current stack pointer to old thread's stack, if any.
+	movl SWITCH_CUR(%esp), %eax
+	movl %esp, (%eax,%edx,1)
+
+	# Restore stack pointer from new thread's stack.
+	movl SWITCH_NEXT(%esp), %ecx
+	movl (%ecx,%edx,1), %esp
+
+	# Restore caller's register state.
+	popl %edi
+	popl %esi
+	popl %ebp
+	popl %ebx
+        ret
+.endfunc
+```
+현재 스레드의 스택 pointer를 stack에 저장한다. 이후 스위치 목표 스레드의 `thread`의 `stack`  값을 복구하고 복구한 스택 내 값들을 pop해 레지스터에 집어넣는다.
 
 ### Kernel Main
 `threads/init.c`의 `main`는 핀토스 실행시 가장 처음으로 실행되는 함수이자 핀토스 프로그램 그 자체이다. 다른 파일의 여러 함수들을 호출하여 커널의 초기화부터 command 실행까지 이루어지게 된다.

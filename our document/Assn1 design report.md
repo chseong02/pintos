@@ -578,7 +578,41 @@ static struct lock tid_lock;
 
 #### `kernel_thread_frame`
 ```c
-stru을 초기화하는 과정이기에 우선 Interrupts가 비활성화된 상태에서 실행되어야만 한다.
+struct kernel_thread_frame 
+  {
+    void *eip;                  /* Return address. */
+    thread_func *function;      /* Function to call. */
+    void *aux;                  /* Auxiliary data for function. */
+  };
+```
+`thread`의 `stack`의 주소부터 저장하는 정보의 구조. 해당 `stack` 위치에는 차례대로 `kernel_thread_frame`, `switch_entry_frame`,`switch_threads_frame` 등의 struct로 저장한다. 해당 stack frame에는 해당 커널 스레드가 어떤 매개변수를 받아 어떤 함수를 실행하고 어디로 리턴해야하는지에 대한 정보를 가지고 있다. 해당 정보는 `thread_create`에서 스레드를 생성할 때 초기화되어 스레드에 저장된다.
+
+#### `idle_ticks, kernel_ticks, user_ticks`
+실제 기능을 담당하는 것이 아닌 분석을 위한 변수들이다,
+각각 idel Thread 보낸 총 tick, 커널 스레드에서 소요한 총 tick, user program에서 사용한 총 tick을 의미한다.
+
+### `thread_ticks`
+마지막으로 yield한 이후 timer tick이 얼마나 지났는지 정하는 static 변수이다.
+주기적으로 스케줄링을 수행해야 할 때 해당 변수 값을 참고한다.
+
+#### `thread_init(void)`
+```c
+void
+thread_init (void) 
+{
+  ASSERT (intr_get_level () == INTR_OFF);
+  lock_init (&tid_lock);
+  list_init (&ready_list);
+  list_init (&all_list);
+  /* Set up a thread structure for the running thread. */
+  initial_thread = running_thread ();
+  init_thread (initial_thread, "main", PRI_DEFAULT);
+  initial_thread->status = THREAD_RUNNING;
+  initial_thread->tid = allocate_tid ();
+}
+```
+> 스레드 시스템을 초기화하는 함수
+스레드를 초기화하는 과정이기에 우선 Interrupts가 비활성화된 상태에서 실행되어야만 한다.
 우선 스레드 시스템과 연관된 `list` 구조체 변수들(`ready_list`,`all_list`) 및 스레드 id 할당과 관련된 `lock` 구조체 변수인 `tid_lock`을 초기화한다. 이후에는 현재 해당 함수를 실행 중인 스레드를 최초의 스레드(`initial_thread`)로 생각하여 본 스레드의 주소를 저장한다. 또한 `init_thread`를 통해 이 함수를 실행 중인 스레드, 즉 `initial_thread`의 `thread` 객체의 `name`을 "main"으로 지정하고 `priority`도 기본 값인 `PRI_DEFAULT`로 지정해준다. 이미 해당 스레드는 `thread_init`을 실행 중이기에  `status`는 `THREAD_RUNNING`으로 지정하고 `allocate_tid`를 통해 새로운 `tid`를 얻어 `initial_thread`의 `tid`로 지정한다. 이로써 해당 함수가 완료되면 본 스레드의 정보들이 올바르게 초기화 된다. **`thread_create`를 통해 새로운 `thread`를 생성하기 전에 page allocator를 초기화해주어야만 한다.**
 
 #### `thread_start(void)`

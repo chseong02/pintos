@@ -3,7 +3,6 @@
 20200229 김경민, 20200423 성치호 
 
 
-
 ## 이론적 배경
 다음은 Pintos 구현을 위한 기초적인 이론적 배경이다. 아래 코드 분석은 해당 내용을 바탕으로 한다. 
 TODO: PPT 등에 포함된 이론적인 내용 추가하기
@@ -343,6 +342,101 @@ run_actions (char **argv)
 매개변수로 입력받은 `argv`를 순회하며 주소가 가리키는 문자열과 `actions`의 아이템과 이름이 일치하는 것이 있는지 확인 후 있다면 해당 `action`에 명시된 argument 개수만큼 제공하였는지 확인한다. 개수가 동일하다면 함수에 해당 action에 해당되는 문자열 주소를 가리키는 argv 내 값의 주소를 해당 `action`에 해당되는 함수`action->function`의 매개변수로 두어 해당 함수를 호출해 action을 수행한다. `argv`를 순회하며 NULL 값을 만날 때까지 이를 반복한다.
 만약 `actions`에 없는 action을 요구하거나 `action`에 대한 args가 부족할 때는 패닉을 일으킨다.
 
+### Interrupt
+#### `idt`
+```c
+static uint64_t idt[INTR_CNT];
+```
+IDT(Interrupt Descriptor Table)을 저장하는 리스트 변수, `intr-stubs.S`에 있는 256개의 x86 interrupt stub과 연결하는 Gate를 저장한다. `intr_init`에서 초기화된다.
+
+#### `intr_handler`
+```c
+static intr_handler_func *intr_handlers[INTR_CNT];
+```
+`idt`에 있는 각 interrupt에 대한 intr handler function을 담은 리스트
+
+#### `intr_level`
+```c
+enum intr_level 
+  {
+    INTR_OFF,             /* Interrupts disabled. */
+    INTR_ON               /* Interrupts enabled. */
+  };
+```
+Interrupt 활성화, 비활성화 여부를 표현하는 enum
+
+#### `intr_get_level`
+```c
+enum intr_level
+intr_get_level (void) 
+{
+  uint32_t flags;
+
+  /* Push the flags register on the processor stack, then pop the
+     value off the stack into `flags'.  See [IA32-v2b] "PUSHF"
+     and "POP" and [IA32-v3a] 5.8.1 "Masking Maskable Hardware
+     Interrupts". */
+  asm volatile ("pushfl; popl %0" : "=g" (flags));
+
+  return flags & FLAG_IF ? INTR_ON : INTR_OFF;
+}
+```
+processor stack에 flag register를 넣고 pop시켜 flag에 저장하여 flag 값을 확인하여 현재 Interrupt 활성화 여부를 `intr_level`로 반환하는 함수
+
+#### `intr_set_level`
+```c
+enum intr_level
+intr_set_level (enum intr_level level) 
+{
+  return level == INTR_ON ? intr_enable () : intr_disable ();
+}
+```
+입력 받은 `intr_level`에 따라 `intr_enable` 또는 `intr_disable`을 통해 interrupt 활성화 여부를 조절하는 함수
+
+#### `intr_enable`
+```c
+enum intr_level
+intr_enable (void) 
+{
+  enum intr_level old_level = intr_get_level ();
+  ASSERT (!intr_context ());
+
+  /* Enable interrupts by setting the interrupt flag.
+
+     See [IA32-v2b] "STI" and [IA32-v3a] 5.8.1 "Masking Maskable
+     Hardware Interrupts". */
+  asm volatile ("sti");
+
+  return old_level;
+}
+```
+> interrupt 를 enable하고 변경 전 원래의 interrupt level을 `intr_level`꼴로 반환하는 함수
+external interrupt를 처리하고 있지 않을 때 실행되어야 한다.
+`sti` 어셈블리를 통해 interrupt flag를 설정함으로써 interrupt를 허용하고 변경 전 원래의 interrupt level을 반환한다.
+
+#### `intr_disable`
+```c
+enum intr_level
+intr_disable (void) 
+{
+  enum intr_level old_level = intr_get_level ();
+
+  /* Disable interrupts by clearing the interrupt flag.
+     See [IA32-v2b] "CLI" and [IA32-v3a] 5.8.1 "Masking Maskable
+     Hardware Interrupts". */
+  asm volatile ("cli" : : : "memory");
+
+  return old_level;
+}
+```
+> interrupt 를 disable하고 변경 전 원래의 interrupt level을 `intr_level`꼴로 반환하는 함수
+`cli` 어셈블리를 통해 interrupt flag를 지움으로써 interrupt를 비활성화하고 변경 전 원래의 interrupt level을 반환한다.
+
+#### `intr_init`
+Programmable Interrupt controller를 초기화한다.
+`idt` 를 순회하며 `intr_stubs`를 참조하여 interrupt stub gate를 집어넣어 초기화한다.
+이후 IDT register를 로드한다.
+마지막으로 interrupt의 번호별 이름이 적힌 `intr_names`를 초기화한다.
 
 ### Thread
 #### `THREAD_MAGIC`
@@ -485,45 +579,7 @@ static struct lock tid_lock;
 
 #### `kernel_thread_frame`
 ```c
-struct kernel_thread_frame 
-  {
-    void *eip;                  /* Return address. */
-    thread_func *function;      /* Function to call. */
-    void *aux;                  /* Auxiliary data for function. */
-  };
-```
-TODO: kernel thread frame 외에도 여러 개 있음.
-
-#### `idle_ticks, kernel_ticks, user_ticks`
-실제 기능을 담당하는 것이 아닌 분석을 위한 변수들이다,
-각각 idel Thread 보낸 총 tick, 커널 스레드에서 소요한 총 tick, user program에서 사용한 총 tick을 의미한다.
-
-### `thread_ticks`
-마지막으로 yield한 이후 timer tick이 얼마나 지났는지 정하는 static 변수이다.
-주기적으로 스케줄링을 수행해야 할 때 해당 변수 값을 참고한다.
-
-#### Thread 연관 함수
-#### `thread_init(void)`
-```c
-void
-thread_init (void) 
-{
-  ASSERT (intr_get_level () == INTR_OFF);
-
-  lock_init (&tid_lock);
-  list_init (&ready_list);
-  list_init (&all_list);
-
-  /* Set up a thread structure for the running thread. */
-  initial_thread = running_thread ();
-  init_thread (initial_thread, "main", PRI_DEFAULT);
-  initial_thread->status = THREAD_RUNNING;
-  initial_thread->tid = allocate_tid ();
-}
-```
-> 스레드 시스템을 초기화하는 함수
-
-스레드를 초기화하는 과정이기에 우선 Interrupts가 비활성화된 상태에서 실행되어야만 한다.
+stru을 초기화하는 과정이기에 우선 Interrupts가 비활성화된 상태에서 실행되어야만 한다.
 우선 스레드 시스템과 연관된 `list` 구조체 변수들(`ready_list`,`all_list`) 및 스레드 id 할당과 관련된 `lock` 구조체 변수인 `tid_lock`을 초기화한다. 이후에는 현재 해당 함수를 실행 중인 스레드를 최초의 스레드(`initial_thread`)로 생각하여 본 스레드의 주소를 저장한다. 또한 `init_thread`를 통해 이 함수를 실행 중인 스레드, 즉 `initial_thread`의 `thread` 객체의 `name`을 "main"으로 지정하고 `priority`도 기본 값인 `PRI_DEFAULT`로 지정해준다. 이미 해당 스레드는 `thread_init`을 실행 중이기에  `status`는 `THREAD_RUNNING`으로 지정하고 `allocate_tid`를 통해 새로운 `tid`를 얻어 `initial_thread`의 `tid`로 지정한다. 이로써 해당 함수가 완료되면 본 스레드의 정보들이 올바르게 초기화 된다. **`thread_create`를 통해 새로운 `thread`를 생성하기 전에 page allocator를 초기화해주어야만 한다.**
 
 #### `thread_start(void)`
@@ -548,7 +604,7 @@ thread_start (void)
 
 여기서 idle thread란 ready된 다른 스레드가 존재하지 않을 때 실행되는 스레드이다.
 interrupt를 활성화함으로써 preemptive(선점형) 스레드 스케줄링을 시작하는 함수로 idle thread도 생성한다. `idle_started`라는 `semaphore`를 생성하고 초기화한다. 
-`idle_started`는 `idle` 함수가 실행되어 `idle_thread` 변수가 초기화가 올바르게 되었는지 확인하는 semaphore 변수이다. 본 함수 끝에서 `sema_down`을 하였고 본 함수를 통해 생성된 `idle`함수를 실행하는 스레드가 running시 `idle` 함수에서 `idle_thread` 값을 본인으로 변경 후 `sema_up`을 하여 `idle`함수가 정상적으로 실행되었으며 `idle_thread`가 잘 초기화 되었음을 표현한다.
+`idle_started`는 `idle` 함수가 실행되어 `idle_thread` 변수가 초기화가 올바르게 되었는지 확인하는 semaphore 변수이다. 본 함수 끝에서 `sema_down`을 하였고 `sema_up`을 할 때까지 기다린다. 본 함수를 통해 생성된 `idle`함수를 실행하는 스레드가 running시 `idle` 함수에서 `idle_thread` 값을 본인으로 변경 후 `sema_up`을 하여 `idle`함수가 정상적으로 실행되었으며 `idle_thread`가 잘 초기화 되었음을 표현한다. `sema_up`이 되면 `thread_start`는 완료되게 된다. 
 
 또한 해당 함수는 `thread_create`를 통해 idle이라는 이름을 가지고 `priority`는 `PRI_MIN`으로 가장 낮은 `idle` 함수를 `idle_started`의 주소를 인수로 사용하여 실행하는 thread를 생성한다. 
 이후에는 `intr_enable`을 통해 interrupts를 허용한다.  
@@ -719,8 +775,260 @@ thread_current (void)
 
 #### `thread_exit`
 
-TODO: 앞 내용 미완성
+```c
+void
+thread_exit (void) 
+{
+  ASSERT (!intr_context ());
 
+#ifdef USERPROG
+  process_exit ();
+#endif
+
+  /* Remove thread from all threads list, set our status to dying,
+     and schedule another process.  That process will destroy us
+     when it calls thread_schedule_tail(). */
+  intr_disable ();
+  list_remove (&thread_current()->allelem);
+  thread_current ()->status = THREAD_DYING;
+  schedule ();
+  NOT_REACHED ();
+}
+```
+> 현재 해당 함수를 실행한 스레드를 스케줄에서 내리고 스레드 자체를 삭제하는 함수.
+먼저 external interrupt를 처리하는 도중에 해당 작업을 진행해서는 안된다. 그렇기에 assert로 이를 확인하고, 또한 `intr_disable()`을 통해 interrupt를 비활성화한다. 그리고 현재 함수를 실행중인 스레드를 모든 스레드 목록이 담긴 `allelem`으로부터 삭제하고 스레드의 상태를 `THREAD_DYING`으로 변경한다. 그 뒤 `schedule`함수를 호출해 해당 스레드를 대신 실행될 스레드로 스위치하게 한다. 이후 해당 스레드는 절대 다시 running하지 않고 `thread_exit`을 호출한 이후 return되지 않는다.
+
+#### `thread_yield`
+```c
+void
+thread_yield (void) 
+{
+  struct thread *cur = thread_current ();
+  enum intr_level old_level;
+  
+  ASSERT (!intr_context ());
+
+  old_level = intr_disable ();
+  if (cur != idle_thread) 
+    list_push_back (&ready_list, &cur->elem);
+  cur->status = THREAD_READY;
+  schedule ();
+  intr_set_level (old_level);
+}
+```
+> 현재 해당 함수를 실행 중인 스레드가 cpu 자원을 다른 스레드에게 넘기기 위해 자신을 ready 상태로 전환 뒤 스케줄링을 요청하는 함수이다.
+다른 스레드 관리 함수와 마찬가지로 먼저 interrupt가 실행 중이지 않고, interrupt를 disable한 상태에서 작업을 진행한다. 
+해당 함수를 호출한 함수가 `idle` 스레드가 아니라면 자신을 스레드 레디큐인 `ready_list` 맨 뒤에 추가하고 스레드 상태도 `THREAD_READY`로 전환한다. 이 때 `idle` 스레드가 아닐 때만 그러한 이유는 `idle` 스레드가 실행 중이라는 것은 실행할 수 있는 다른 스레드가 없음을 나타내기 때문으로 예상된다.
+그리고 `schedule`을 통해 스케줄링을 요청한다. 이로써 현재 핀토스 구현에서는 priority와 무관하게 현재 큐의 맨 앞의 스레드로 전환된다. 
+이후 interrupt 레벨을 원래대로 되돌린다.
+
+#### `thread_foreach`
+```c
+void
+thread_foreach (thread_action_func *func, void *aux)
+{
+  struct list_elem *e;
+
+  ASSERT (intr_get_level () == INTR_OFF);
+
+  for (e = list_begin (&all_list); e != list_end (&all_list);
+       e = list_next (e))
+    {
+      struct thread *t = list_entry (e, struct thread, allelem);
+      func (t, aux);
+    }
+}
+```
+> 매개변수로 넘긴 함수를 함께 넘긴 매개변수 aux와 함께 모든 각 스레드를 대상으로 실행하는 함수이다.
+interrupt가 비활성화된 상태에서만 실행되어야 한다.
+`all_list`를 순회하며 각 `list_elem`이 가리키는 스레드의 주소를 매개변수로 받은 함수에 매개변수로 받은 aux와 함께 매개변수로 넣어 실행한다.
+
+#### `idle`
+```c
+static void
+idle (void *idle_started_ UNUSED) 
+{
+  struct semaphore *idle_started = idle_started_;
+  idle_thread = thread_current ();
+  sema_up (idle_started);
+
+  for (;;) 
+    {
+      /* Let someone else run. */
+      intr_disable ();
+      thread_block ();
+      
+      asm volatile ("sti; hlt" : : : "memory");
+    }
+}
+```
+> idle thread가 실행할 함수.
+idle thread는 ready 상태의 thread가 하나도 없을 때 실행되는 스레드이다. `idle_thread`에 현재 `idle`을 실행 중인 자기 자신 스레드를 넣는다. 또한 `sema_up(idle_started)`을 통해 `thread_start`가 semaphore에서 풀려 더 진행 가능하게 한다. `sti; hlt`는 atomically 하게 실행되며 이는 인터럽트를 활성화시키고 인터럽트 발생시까지 cpu를 대기시키는 것이다.
+자기 자신이 특별한 일이 아닌 이상 running queue에 올라가지 않고 running되지 않도록 한다. (`thread_yield`에서 `idle_thread`일 경우 running queue에 올리지 않는다)
+`next_thread_to_run`에서 `ready_list`가 비어있을 때만 `idle_thread`를 반환함으로써 `schedule`에서 다음에 `idle_thread`를 실행하게 된다.
+
+#### `kernel_thread`
+```c
+static void
+kernel_thread (thread_func *function, void *aux) 
+{
+  ASSERT (function != NULL);
+
+  intr_enable ();       /* The scheduler runs with interrupts off. */
+  function (aux);       /* Execute the thread function. */
+  thread_exit ();       /* If function() returns, kill the thread. */
+}
+```
+> kernel thread가 실행할 함수
+interrupt를 허용하고 함수와 해당 함수에 사용할 매개변수를 받아 해당 함수를 실행한 뒤 실행 완료하면 `thread_exit`을 통해 `kernel_thread` 를 실행 중인 스레드를 죽인다.
+
+#### `running_thread`
+```c
+struct thread *
+running_thread (void) 
+{
+  uint32_t *esp;
+
+  asm ("mov %%esp, %0" : "=g" (esp));
+  return pg_round_down (esp);
+}
+```
+> `esp` 변수에 CPU의 stack pointer를 복사해와 페이지 단위로 주소를 내림하여 현재 실행 중인 스레드의 `thread` 구조체의 주소를 얻는다. 앞서 말하였듯이 `thread` 구조체는 페이지 단위로 저장되기 때문이다.
+
+#### `is_thread`
+```c
+static bool
+is_thread (struct thread *t)
+{
+  return t != NULL && t->magic == THREAD_MAGIC;
+}
+```
+> 입력받은 포인터가 가리키는 `thread`의 정합성을 검사하여 반환하는 함수
+입력받은 포인터가 가리키는 `thread`가 정상적인 `thread`를 가지고 있는지 `magic`을 통해 스택 오버플로우는 발생하지 않았는지 확인하여 `thread`의 정합성을 반환한다.
+
+#### `init_thread`
+```c
+static void
+init_thread (struct thread *t, const char *name, int priority)
+{
+  enum intr_level old_level;
+
+  ASSERT (t != NULL);
+  ASSERT (PRI_MIN <= priority && priority <= PRI_MAX);
+  ASSERT (name != NULL);
+
+  memset (t, 0, sizeof *t);
+  t->status = THREAD_BLOCKED;
+  strlcpy (t->name, name, sizeof t->name);
+  t->stack = (uint8_t *) t + PGSIZE;
+  t->priority = priority;
+  t->magic = THREAD_MAGIC;
+
+  old_level = intr_disable ();
+  list_push_back (&all_list, &t->allelem);
+  intr_set_level (old_level);
+}
+```
+> 주로 이제 막 새로 생성된/공간을 할당 받은 스레드에 대해 이름, priority 설정을 비롯한 스레드를 위한 메모리 초기화 등, 기본적인 초기화를 진행하는 함수.
+해당 함수는 주로 `thread_crate`에서 스레드를 위한 공간을 할당해 준 직후 실행되어 실질적으로 스레드를 초기화한다.
+먼저 입력된 매개변수에 대한 조건 검사를 수행한다.
+이후 입력받은 `thread`가 차지할 메모리를 0으로 초기화한다. 이후 `status`는 **`THREAD_BLOCKED`로 설정하고** 이름, 스택 위치 설정, 우선순위 설정 등 `thread` 구조체 초기화를 수행한다. 마지막으로 `interrupt`를 비활성하고 스레드 전체 리스트 `all_list`에 `thread`를 저장하고 다시 interrupt level을 되돌린다.
+
+#### `alloc_frame`
+```c
+static void *
+alloc_frame (struct thread *t, size_t size) 
+{
+  /* Stack data is always allocated in word-size units. */
+  ASSERT (is_thread (t));
+  ASSERT (size % sizeof (uint32_t) == 0);
+
+  t->stack -= size;
+  return t->stack;
+}
+```
+먼저 정상적인 스레드인지, 정상적인 사이즈 할당을 요구하는지 검사한다.
+`size`만큼 `thread`의 `stack`의 공간을 할당하고 할당한 크기만큼 `stack`의 위치를 옮겨준다. 그리고 그렇게 변경된 주소를 반환해준다. 이 후 `alloc_frame`을 통해 또 할당하는 경우 변경된 `stack`으로부터 이를 수행한다.
+
+#### `next_thread_to_run`
+```c
+static struct thread *
+next_thread_to_run (void) 
+{
+  if (list_empty (&ready_list))
+    return idle_thread;
+  else
+    return list_entry (list_pop_front (&ready_list), struct thread, elem);
+}
+```
+> 다음에 어떤 스레드를 실행하게 스케줄할지 결정하여 반환하는 함수
+ready된 스레드를 모아둔 `ready_list`가 비어 있다면 현재 ready된 스레드가 하나도 없으므로 `idle_thread`를 반환하고 비어있지 않다면 `ready_list` 큐의 pop 된 스레드를 반환한다. 즉 `ready_list`에 들어온 순서대로 선입선출 순서로 반환하게 될 것이다.
+
+#### `thread_schedule_tail`
+```c
+void
+thread_schedule_tail (struct thread *prev)
+{
+  struct thread *cur = running_thread ();
+  
+  ASSERT (intr_get_level () == INTR_OFF);
+
+  /* Mark us as running. */
+  cur->status = THREAD_RUNNING;
+
+  /* Start new time slice. */
+  thread_ticks = 0;
+
+#ifdef USERPROG
+  /* Activate the new address space. */
+  process_activate ();
+#endif
+
+  if (prev != NULL && prev->status == THREAD_DYING && prev != initial_thread) 
+    {
+      ASSERT (prev != cur);
+      palloc_free_page (prev);
+    }
+}
+```
+
+#### `schedule`
+```c
+static void
+schedule (void) 
+{
+  struct thread *cur = running_thread ();
+  struct thread *next = next_thread_to_run ();
+  struct thread *prev = NULL;
+
+  ASSERT (intr_get_level () == INTR_OFF);
+  ASSERT (cur->status != THREAD_RUNNING);
+  ASSERT (is_thread (next));
+
+  if (cur != next)
+    prev = switch_threads (cur, next);
+  thread_schedule_tail (prev);
+}
+```
+
+#### `allocate_tid`
+```c
+static tid_t
+allocate_tid (void) 
+{
+  static tid_t next_tid = 1;
+  tid_t tid;
+
+  lock_acquire (&tid_lock);
+  tid = next_tid++;
+  lock_release (&tid_lock);
+
+  return tid;
+}
+```
+> 새로 생성한 스레드를 위한 `tid`를 반환하는 함수
+먼저 tid는 1부터 값을 1씩 증가해나가므로 모든 스레드는 서로 다른 tid를 가지며 늦게 생성됨에 따라 tid 값이 1씩 증가한다. static 변수 `next_tid`를 통해 다음 스레드를 위한 tid를 저장한다. 또한 현재 스레드를 위한 tid를 결정한 이후 next_tid를 1 증가시킨다.
+마지막으로 이렇게 `tid`를 할당하고 `next_tid`를 변형하는 작업을 수행하는 동안 다른 스레드에서 해당 함수를 실행하지 못하게 하기 위해 lock `tid_lock`을 사용한다. 왜냐하면 여러 스레드가 함께 함수를 호출하면 같은 `tid`가 할당될 가능성이 있기 때문이다.
 
 ### Kernel Main
 `threads/init.c`의 `main`는 핀토스 실행시 가장 처음으로 실행되는 함수이자 핀토스 프로그램 그 자체이다. 다른 파일의 여러 함수들을 호출하여 커널의 초기화부터 command 실행까지 이루어지게 된다.
@@ -776,7 +1084,7 @@ main (void)
 #endif
 ```
 User Program을 위한 기본 설정을 진행한 뒤, 
-
+`intr_init()`을 통해 PIC와 IDT를 초기화하고 `timer_init`을 통해 PIT(Programmable Interrupt Timer) 설정 및 timer interrupt에 대한 핸들러를 등록한다. 이후 키보드 및 인풋 버퍼를 초기화한다.
 
 ```c
   /* Start thread scheduler and enable interrupts. */
@@ -791,7 +1099,7 @@ User Program을 위한 기본 설정을 진행한 뒤,
   filesys_init (format_filesys);
 #endif
 ```
-
+`thread_start`를 통해 `idle` 스레드를 생성 및 초기화하고 interrupt를 활성화함으로서 timer에 의해 스케줄링도 가능하게 한다. 이후 `serial_init_queue`를 이용해 interrupt-driven I/O를 위한 serial port를 초기화한다. 균일한 틱당 딜레이를 형성하기 위해 타이머 칼리브레이션을 진행하고 몇몇 파일 설정을 진행한다.
 
 ```c
   printf ("Boot complete.\n");
@@ -804,7 +1112,8 @@ User Program을 위한 기본 설정을 진행한 뒤,
   thread_exit ();
 }
 ```
-
+앞서 `parse_options`에서 구한 non-option command 및 해당 command에 대한 argument를 이용해 해당 명령을 수행한다.
+command로 입력받은 명령 수행이 완료되면 `thread_exit`을 통해 `main`함수를 실행하던 스레드를 죽이고 이에 따라 커널은 종료된다.
 
 ### Scheduler
 
@@ -1130,8 +1439,6 @@ void cond_broadcast (struct condition *cond, struct lock *lock)
 ```
 해당 스레드가 Lock을 보유하고 있고 인터럽트 중이 아닐 경우, `cond`의  Semaphore list에 있는 모든 Semaphore를 up하여 해당 Conditional variable에 의해 `wait` 상태에 있던 스레드들을 모두 깨운다.
 
-
-
 ### Timer
 
 ```c
@@ -1258,4 +1565,3 @@ sign
 |mul fp, int|`x * n`|
 |div fp, fp|`((int64_t) x) * f / y`|
 |div fp, int|`x / n`|
-

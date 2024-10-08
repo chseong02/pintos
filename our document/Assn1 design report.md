@@ -460,7 +460,6 @@ enum thread_status
 ```
 `thread` 구조체에서 `thread`의 상태를 나타낼 때 사용하는 열거형.
 위의 이론적 배경에서 설명하였듯 스레드는 4개의 스레드 상태를 왔다갔다하는 lifecycle을 가진다. 
-TODO: 스레드 각 상태 의미 배경지식 추가 필요
 
 #### `tid_t`
 ```c
@@ -582,7 +581,41 @@ static struct lock tid_lock;
 
 #### `kernel_thread_frame`
 ```c
-stru을 초기화하는 과정이기에 우선 Interrupts가 비활성화된 상태에서 실행되어야만 한다.
+struct kernel_thread_frame 
+  {
+    void *eip;                  /* Return address. */
+    thread_func *function;      /* Function to call. */
+    void *aux;                  /* Auxiliary data for function. */
+  };
+```
+`thread`의 `stack`의 주소부터 저장하는 정보의 구조. 해당 `stack` 위치에는 차례대로 `kernel_thread_frame`, `switch_entry_frame`,`switch_threads_frame` 등의 struct로 저장한다. 해당 stack frame에는 해당 커널 스레드가 어떤 매개변수를 받아 어떤 함수를 실행하고 어디로 리턴해야하는지에 대한 정보를 가지고 있다. 해당 정보는 `thread_create`에서 스레드를 생성할 때 초기화되어 스레드에 저장된다.
+
+#### `idle_ticks, kernel_ticks, user_ticks`
+실제 기능을 담당하는 것이 아닌 분석을 위한 변수들이다,
+각각 idel Thread 보낸 총 tick, 커널 스레드에서 소요한 총 tick, user program에서 사용한 총 tick을 의미한다.
+
+### `thread_ticks`
+마지막으로 yield한 이후 timer tick이 얼마나 지났는지 정하는 static 변수이다.
+주기적으로 스케줄링을 수행해야 할 때 해당 변수 값을 참고한다.
+
+#### `thread_init(void)`
+```c
+void
+thread_init (void) 
+{
+  ASSERT (intr_get_level () == INTR_OFF);
+  lock_init (&tid_lock);
+  list_init (&ready_list);
+  list_init (&all_list);
+  /* Set up a thread structure for the running thread. */
+  initial_thread = running_thread ();
+  init_thread (initial_thread, "main", PRI_DEFAULT);
+  initial_thread->status = THREAD_RUNNING;
+  initial_thread->tid = allocate_tid ();
+}
+```
+> 스레드 시스템을 초기화하는 함수
+스레드를 초기화하는 과정이기에 우선 Interrupts가 비활성화된 상태에서 실행되어야만 한다.
 우선 스레드 시스템과 연관된 `list` 구조체 변수들(`ready_list`,`all_list`) 및 스레드 id 할당과 관련된 `lock` 구조체 변수인 `tid_lock`을 초기화한다. 이후에는 현재 해당 함수를 실행 중인 스레드를 최초의 스레드(`initial_thread`)로 생각하여 본 스레드의 주소를 저장한다. 또한 `init_thread`를 통해 이 함수를 실행 중인 스레드, 즉 `initial_thread`의 `thread` 객체의 `name`을 "main"으로 지정하고 `priority`도 기본 값인 `PRI_DEFAULT`로 지정해준다. 이미 해당 스레드는 `thread_init`을 실행 중이기에  `status`는 `THREAD_RUNNING`으로 지정하고 `allocate_tid`를 통해 새로운 `tid`를 얻어 `initial_thread`의 `tid`로 지정한다. 이로써 해당 함수가 완료되면 본 스레드의 정보들이 올바르게 초기화 된다. **`thread_create`를 통해 새로운 `thread`를 생성하기 전에 page allocator를 초기화해주어야만 한다.**
 
 #### `thread_start(void)`
@@ -799,6 +832,7 @@ thread_exit (void)
 }
 ```
 > 현재 해당 함수를 실행한 스레드를 스케줄에서 내리고 스레드 자체를 삭제하는 함수.
+
 먼저 external interrupt를 처리하는 도중에 해당 작업을 진행해서는 안된다. 그렇기에 assert로 이를 확인하고, 또한 `intr_disable()`을 통해 interrupt를 비활성화한다. 그리고 현재 함수를 실행중인 스레드를 모든 스레드 목록이 담긴 `allelem`으로부터 삭제하고 스레드의 상태를 `THREAD_DYING`으로 변경한다. 그 뒤 `schedule`함수를 호출해 해당 스레드를 대신 실행될 스레드로 스위치하게 한다. 이후 해당 스레드는 절대 다시 running하지 않고 `thread_exit`을 호출한 이후 return되지 않는다.
 
 #### `thread_yield`
@@ -820,6 +854,7 @@ thread_yield (void)
 }
 ```
 > 현재 해당 함수를 실행 중인 스레드가 cpu 자원을 다른 스레드에게 넘기기 위해 자신을 ready 상태로 전환 뒤 스케줄링을 요청하는 함수이다.
+
 다른 스레드 관리 함수와 마찬가지로 먼저 interrupt가 실행 중이지 않고, interrupt를 disable한 상태에서 작업을 진행한다. 
 해당 함수를 호출한 함수가 `idle` 스레드가 아니라면 자신을 스레드 레디큐인 `ready_list` 맨 뒤에 추가하고 스레드 상태도 `THREAD_READY`로 전환한다. 이 때 `idle` 스레드가 아닐 때만 그러한 이유는 `idle` 스레드가 실행 중이라는 것은 실행할 수 있는 다른 스레드가 없음을 나타내기 때문으로 예상된다.
 그리고 `schedule`을 통해 스케줄링을 요청한다. 이로써 현재 핀토스 구현에서는 priority와 무관하게 현재 큐의 맨 앞의 스레드로 전환된다. 
@@ -843,6 +878,7 @@ thread_foreach (thread_action_func *func, void *aux)
 }
 ```
 > 매개변수로 넘긴 함수를 함께 넘긴 매개변수 aux와 함께 모든 각 스레드를 대상으로 실행하는 함수이다.
+
 interrupt가 비활성화된 상태에서만 실행되어야 한다.
 `all_list`를 순회하며 각 `list_elem`이 가리키는 스레드의 주소를 매개변수로 받은 함수에 매개변수로 받은 aux와 함께 매개변수로 넣어 실행한다.
 
@@ -866,6 +902,7 @@ idle (void *idle_started_ UNUSED)
 }
 ```
 > idle thread가 실행할 함수.
+
 idle thread는 ready 상태의 thread가 하나도 없을 때 실행되는 스레드이다. `idle_thread`에 현재 `idle`을 실행 중인 자기 자신 스레드를 넣는다. 또한 `sema_up(idle_started)`을 통해 `thread_start`가 semaphore에서 풀려 더 진행 가능하게 한다. `sti; hlt`는 atomically 하게 실행되며 이는 인터럽트를 활성화시키고 인터럽트 발생시까지 cpu를 대기시키는 것이다.
 자기 자신이 특별한 일이 아닌 이상 running queue에 올라가지 않고 running되지 않도록 한다. (`thread_yield`에서 `idle_thread`일 경우 running queue에 올리지 않는다)
 `next_thread_to_run`에서 `ready_list`가 비어있을 때만 `idle_thread`를 반환함으로써 `schedule`에서 다음에 `idle_thread`를 실행하게 된다.
@@ -883,6 +920,7 @@ kernel_thread (thread_func *function, void *aux)
 }
 ```
 > kernel thread가 실행할 함수
+
 interrupt를 허용하고 함수와 해당 함수에 사용할 매개변수를 받아 해당 함수를 실행한 뒤 실행 완료하면 `thread_exit`을 통해 `kernel_thread` 를 실행 중인 스레드를 죽인다.
 
 #### `running_thread`
@@ -933,6 +971,7 @@ init_thread (struct thread *t, const char *name, int priority)
 }
 ```
 > 주로 이제 막 새로 생성된/공간을 할당 받은 스레드에 대해 이름, priority 설정을 비롯한 스레드를 위한 메모리 초기화 등, 기본적인 초기화를 진행하는 함수.
+
 해당 함수는 주로 `thread_crate`에서 스레드를 위한 공간을 할당해 준 직후 실행되어 실질적으로 스레드를 초기화한다.
 먼저 입력된 매개변수에 대한 조건 검사를 수행한다.
 이후 입력받은 `thread`가 차지할 메모리를 0으로 초기화한다. 이후 `status`는 **`THREAD_BLOCKED`로 설정하고** 이름, 스택 위치 설정, 우선순위 설정 등 `thread` 구조체 초기화를 수행한다. 마지막으로 `interrupt`를 비활성하고 스레드 전체 리스트 `all_list`에 `thread`를 저장하고 다시 interrupt level을 되돌린다.
@@ -965,7 +1004,9 @@ next_thread_to_run (void)
 }
 ```
 > 다음에 어떤 스레드를 실행하게 스케줄할지 결정하여 반환하는 함수
+
 ready된 스레드를 모아둔 `ready_list`가 비어 있다면 현재 ready된 스레드가 하나도 없으므로 `idle_thread`를 반환하고 비어있지 않다면 `ready_list` 큐의 pop 된 스레드를 반환한다. 즉 `ready_list`에 들어온 순서대로 선입선출 순서로 반환하게 될 것이다.
+
 
 #### `thread_schedule_tail`
 ```c
@@ -1013,6 +1054,9 @@ schedule (void)
   thread_schedule_tail (prev);
 }
 ```
+> 다음에 실행할 스레드를 결정하고 그 스레드를 스케줄하는 함수
+
+먼저 해당 함수는 반드시 interrupt가 비활성화된 상태, 현재 해당 함수를 실행하는 스레드가 `THREAD_RUNNING`이 아닌 다른 상태여야만 한다. `next_thread_to_run`을 통해 다음에 실행해야할 스레드가 무엇일지를 얻는다. 그리고 이렇게 얻은 스레드가 현재 스레드가 아니라면 `switch_threads`를 통해 해당 스레드로 switch하고 `thread_schedule_tail`을 호출한다.
 
 #### `allocate_tid`
 ```c
@@ -1030,8 +1074,76 @@ allocate_tid (void)
 }
 ```
 > 새로 생성한 스레드를 위한 `tid`를 반환하는 함수
+
 먼저 tid는 1부터 값을 1씩 증가해나가므로 모든 스레드는 서로 다른 tid를 가지며 늦게 생성됨에 따라 tid 값이 1씩 증가한다. static 변수 `next_tid`를 통해 다음 스레드를 위한 tid를 저장한다. 또한 현재 스레드를 위한 tid를 결정한 이후 next_tid를 1 증가시킨다.
 마지막으로 이렇게 `tid`를 할당하고 `next_tid`를 변형하는 작업을 수행하는 동안 다른 스레드에서 해당 함수를 실행하지 못하게 하기 위해 lock `tid_lock`을 사용한다. 왜냐하면 여러 스레드가 함께 함수를 호출하면 같은 `tid`가 할당될 가능성이 있기 때문이다.
+
+### Switch
+switch thread에 대한 실질적인 코드는 대부분 `threads/switch.S`에 구현되어 있고 `threads/switch.h`는 이에 대한 interface만을 포함하고 있다. 
+
+#### `switch_threads_frame`
+```c
+struct switch_threads_frame 
+  {
+    uint32_t edi;               /*  0: Saved %edi. */
+    uint32_t esi;               /*  4: Saved %esi. */
+    uint32_t ebp;               /*  8: Saved %ebp. */
+    uint32_t ebx;               /* 12: Saved %ebx. */
+    void (*eip) (void);         /* 16: Return address. */
+    struct thread *cur;         /* 20: switch_threads()'s CUR argument. */
+    struct thread *next;        /* 24: switch_threads()'s NEXT argument. */
+  };
+```
+함수 `switch_threads`을 수행하는데 사용될 stack frame이다. 해당 구조체 변수는 각 `thread`의 `stack`에 다른 stack frame 들과 함께 저장되어 있다. 또한 이는 `thread_create`에서 초기화된다.
+`switch_thread`를 수행할 때 저장할 현재 스레드의 몇몇 레지스터 값, `switch_thread`에서 사용할 매개변수인 switch 전 스레드 포인터, switch 이후 스레드 포인터를 포함한다.
+
+#### `switch_threads`
+```c
+struct thread *switch_threads (struct thread *cur, struct thread *next);
+```
+> 현재  실행 중인 스레드 `cur`에 대한 정보를 저장하고 `next`가 가리키는 스레드를 실행하도록 변경하고 관련 정보를 복구하는 함수
+
+```assembly
+.globl switch_threads
+.func switch_threads
+switch_threads:
+	# Save caller's register state.
+	#
+	# Note that the SVR4 ABI allows us to destroy %eax, %ecx, %edx,
+	# but requires us to preserve %ebx, %ebp, %esi, %edi.  See
+	# [SysV-ABI-386] pages 3-11 and 3-12 for details.
+	#
+	# This stack frame must match the one set up by thread_create()
+	# in size.
+	pushl %ebx
+	pushl %ebp
+	pushl %esi
+	pushl %edi
+```
+`pushl`을 통해 현재 스레드의 `switch_threads_frame`의 위치에 4개의 레지스터 값들을 저장한다. 
+
+```assembly
+	# Get offsetof (struct thread, stack).
+.globl thread_stack_ofs
+	mov thread_stack_ofs, %edx
+
+	# Save current stack pointer to old thread's stack, if any.
+	movl SWITCH_CUR(%esp), %eax
+	movl %esp, (%eax,%edx,1)
+
+	# Restore stack pointer from new thread's stack.
+	movl SWITCH_NEXT(%esp), %ecx
+	movl (%ecx,%edx,1), %esp
+
+	# Restore caller's register state.
+	popl %edi
+	popl %esi
+	popl %ebp
+	popl %ebx
+        ret
+.endfunc
+```
+현재 스레드의 스택 pointer를 stack에 저장한다. 이후 스위치 목표 스레드의 `thread`의 `stack`  값을 복구하고 복구한 스택 내 값들을 pop해 레지스터에 집어넣는다.
 
 ### Kernel Main
 `threads/init.c`의 `main`는 핀토스 실행시 가장 처음으로 실행되는 함수이자 핀토스 프로그램 그 자체이다. 다른 파일의 여러 함수들을 호출하여 커널의 초기화부터 command 실행까지 이루어지게 된다.
@@ -1115,7 +1227,7 @@ User Program을 위한 기본 설정을 진행한 뒤,
   thread_exit ();
 }
 ```
-앞서 `parse_options`에서 구한 non-option command 및 해당 command에 대한 argument를 이용해 해당 명령을 수행한다.
+앞서 `parse_options`에서 구한 non-option command 및 해당 command에 대한 argument를 이용해 해당 명령을 수행한다. `run action`에서 실행한 함수가 다른 스레드를 생성해 사용하기도 한다.
 command로 입력받은 명령 수행이 완료되면 `thread_exit`을 통해 `main`함수를 실행하던 스레드를 죽이고 이에 따라 커널은 종료된다.
 
 ### Scheduler

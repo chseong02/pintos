@@ -3,13 +3,6 @@
 20200229 김경민, 20200423 성치호 
 
 
-## 이론적 배경
-다음은 Pintos 구현을 위한 기초적인 이론적 배경이다. 아래 코드 분석은 해당 내용을 바탕으로 한다. 
-TODO: PPT 등에 포함된 이론적인 내용 추가하기
-
-### 
-TODO: Assn1.md 내용 적당히 요약해서 앞에 넣기
-
 ## Pintos 구현 분석
 ### 자주 사용되는 구조체 및 함수
 #### `ptov(uintptr_t paddr)`
@@ -829,6 +822,7 @@ thread_exit (void)
 }
 ```
 > 현재 해당 함수를 실행한 스레드를 스케줄에서 내리고 스레드 자체를 삭제하는 함수.
+
 먼저 external interrupt를 처리하는 도중에 해당 작업을 진행해서는 안된다. 그렇기에 assert로 이를 확인하고, 또한 `intr_disable()`을 통해 interrupt를 비활성화한다. 그리고 현재 함수를 실행중인 스레드를 모든 스레드 목록이 담긴 `allelem`으로부터 삭제하고 스레드의 상태를 `THREAD_DYING`으로 변경한다. 그 뒤 `schedule`함수를 호출해 해당 스레드를 대신 실행될 스레드로 스위치하게 한다. 이후 해당 스레드는 절대 다시 running하지 않고 `thread_exit`을 호출한 이후 return되지 않는다.
 
 #### `thread_yield`
@@ -850,6 +844,7 @@ thread_yield (void)
 }
 ```
 > 현재 해당 함수를 실행 중인 스레드가 cpu 자원을 다른 스레드에게 넘기기 위해 자신을 ready 상태로 전환 뒤 스케줄링을 요청하는 함수이다.
+
 다른 스레드 관리 함수와 마찬가지로 먼저 interrupt가 실행 중이지 않고, interrupt를 disable한 상태에서 작업을 진행한다. 
 해당 함수를 호출한 함수가 `idle` 스레드가 아니라면 자신을 스레드 레디큐인 `ready_list` 맨 뒤에 추가하고 스레드 상태도 `THREAD_READY`로 전환한다. 이 때 `idle` 스레드가 아닐 때만 그러한 이유는 `idle` 스레드가 실행 중이라는 것은 실행할 수 있는 다른 스레드가 없음을 나타내기 때문으로 예상된다.
 그리고 `schedule`을 통해 스케줄링을 요청한다. 이로써 현재 핀토스 구현에서는 priority와 무관하게 현재 큐의 맨 앞의 스레드로 전환된다. 
@@ -873,6 +868,7 @@ thread_foreach (thread_action_func *func, void *aux)
 }
 ```
 > 매개변수로 넘긴 함수를 함께 넘긴 매개변수 aux와 함께 모든 각 스레드를 대상으로 실행하는 함수이다.
+
 interrupt가 비활성화된 상태에서만 실행되어야 한다.
 `all_list`를 순회하며 각 `list_elem`이 가리키는 스레드의 주소를 매개변수로 받은 함수에 매개변수로 받은 aux와 함께 매개변수로 넣어 실행한다.
 
@@ -896,6 +892,7 @@ idle (void *idle_started_ UNUSED)
 }
 ```
 > idle thread가 실행할 함수.
+
 idle thread는 ready 상태의 thread가 하나도 없을 때 실행되는 스레드이다. `idle_thread`에 현재 `idle`을 실행 중인 자기 자신 스레드를 넣는다. 또한 `sema_up(idle_started)`을 통해 `thread_start`가 semaphore에서 풀려 더 진행 가능하게 한다. `sti; hlt`는 atomically 하게 실행되며 이는 인터럽트를 활성화시키고 인터럽트 발생시까지 cpu를 대기시키는 것이다.
 자기 자신이 특별한 일이 아닌 이상 running queue에 올라가지 않고 running되지 않도록 한다. (`thread_yield`에서 `idle_thread`일 경우 running queue에 올리지 않는다)
 `next_thread_to_run`에서 `ready_list`가 비어있을 때만 `idle_thread`를 반환함으로써 `schedule`에서 다음에 `idle_thread`를 실행하게 된다.
@@ -913,6 +910,7 @@ kernel_thread (thread_func *function, void *aux)
 }
 ```
 > kernel thread가 실행할 함수
+
 interrupt를 허용하고 함수와 해당 함수에 사용할 매개변수를 받아 해당 함수를 실행한 뒤 실행 완료하면 `thread_exit`을 통해 `kernel_thread` 를 실행 중인 스레드를 죽인다.
 
 #### `running_thread`
@@ -963,6 +961,7 @@ init_thread (struct thread *t, const char *name, int priority)
 }
 ```
 > 주로 이제 막 새로 생성된/공간을 할당 받은 스레드에 대해 이름, priority 설정을 비롯한 스레드를 위한 메모리 초기화 등, 기본적인 초기화를 진행하는 함수.
+
 해당 함수는 주로 `thread_crate`에서 스레드를 위한 공간을 할당해 준 직후 실행되어 실질적으로 스레드를 초기화한다.
 먼저 입력된 매개변수에 대한 조건 검사를 수행한다.
 이후 입력받은 `thread`가 차지할 메모리를 0으로 초기화한다. 이후 `status`는 **`THREAD_BLOCKED`로 설정하고** 이름, 스택 위치 설정, 우선순위 설정 등 `thread` 구조체 초기화를 수행한다. 마지막으로 `interrupt`를 비활성하고 스레드 전체 리스트 `all_list`에 `thread`를 저장하고 다시 interrupt level을 되돌린다.
@@ -995,6 +994,7 @@ next_thread_to_run (void)
 }
 ```
 > 다음에 어떤 스레드를 실행하게 스케줄할지 결정하여 반환하는 함수
+
 ready된 스레드를 모아둔 `ready_list`가 비어 있다면 현재 ready된 스레드가 하나도 없으므로 `idle_thread`를 반환하고 비어있지 않다면 `ready_list` 큐의 pop 된 스레드를 반환한다. 즉 `ready_list`에 들어온 순서대로 선입선출 순서로 반환하게 될 것이다.
 
 
@@ -1045,6 +1045,7 @@ schedule (void)
 }
 ```
 > 다음에 실행할 스레드를 결정하고 그 스레드를 스케줄하는 함수
+
 먼저 해당 함수는 반드시 interrupt가 비활성화된 상태, 현재 해당 함수를 실행하는 스레드가 `THREAD_RUNNING`이 아닌 다른 상태여야만 한다. `next_thread_to_run`을 통해 다음에 실행해야할 스레드가 무엇일지를 얻는다. 그리고 이렇게 얻은 스레드가 현재 스레드가 아니라면 `switch_threads`를 통해 해당 스레드로 switch하고 `thread_schedule_tail`을 호출한다.
 
 #### `allocate_tid`
@@ -1063,6 +1064,7 @@ allocate_tid (void)
 }
 ```
 > 새로 생성한 스레드를 위한 `tid`를 반환하는 함수
+
 먼저 tid는 1부터 값을 1씩 증가해나가므로 모든 스레드는 서로 다른 tid를 가지며 늦게 생성됨에 따라 tid 값이 1씩 증가한다. static 변수 `next_tid`를 통해 다음 스레드를 위한 tid를 저장한다. 또한 현재 스레드를 위한 tid를 결정한 이후 next_tid를 1 증가시킨다.
 마지막으로 이렇게 `tid`를 할당하고 `next_tid`를 변형하는 작업을 수행하는 동안 다른 스레드에서 해당 함수를 실행하지 못하게 하기 위해 lock `tid_lock`을 사용한다. 왜냐하면 여러 스레드가 함께 함수를 호출하면 같은 `tid`가 할당될 가능성이 있기 때문이다.
 
@@ -1215,7 +1217,7 @@ User Program을 위한 기본 설정을 진행한 뒤,
   thread_exit ();
 }
 ```
-앞서 `parse_options`에서 구한 non-option command 및 해당 command에 대한 argument를 이용해 해당 명령을 수행한다.
+앞서 `parse_options`에서 구한 non-option command 및 해당 command에 대한 argument를 이용해 해당 명령을 수행한다. `run action`에서 실행한 함수가 다른 스레드를 생성해 사용하기도 한다.
 command로 입력받은 명령 수행이 완료되면 `thread_exit`을 통해 `main`함수를 실행하던 스레드를 죽이고 이에 따라 커널은 종료된다.
 
 ### Scheduler

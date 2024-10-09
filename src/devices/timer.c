@@ -129,6 +129,7 @@ timer_sleep (int64_t ticks)
   
   /* Thread block need Interrupt disabled */
   old_level = intr_disable ();
+  cur->wake_up_tick = start + ticks;
   list_insert_ordered (&sleep_list, &(cur->sleep_elem), wake_up_tick_less, NULL);
   thread_block ();
 

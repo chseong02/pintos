@@ -250,3 +250,15 @@ real_time_delay (int64_t num, int32_t denom)
   ASSERT (denom % 1000 == 0);
   busy_wait (loops_per_tick * num / 1000 * TIMER_FREQ / (denom / 1000)); 
 }
+
+/* Returns true if a_'s thread's wake_up_tick is less than 
+   b_'s thread's wake_up_tick, false otherwise. */
+static bool
+wake_up_tick_less (const struct list_elem *a_, const struct list_elem *b_,
+            void *aux UNUSED) 
+{
+  const struct thread *a = list_entry (a_, struct thread, elem);
+  const struct thread *b = list_entry (b_, struct thread, elem);
+  
+  return a->wake_up_tick < b->wake_up_tick;
+}

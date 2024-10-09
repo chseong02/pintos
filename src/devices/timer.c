@@ -98,14 +98,16 @@ check_wake_up (void)
 {
   // TODO: assert하면 좋을 것들 추가
   int64_t now = timer_ticks ();
-  struct thread *t = list_entry (list_front (&sleep_list), struct thread, sleep_elem);
 
-  while (t->wake_up_tick <= now)
+  while (list_empty(&sleep_list) == false)
   {
-    t = list_pop_front (&sleep_list);
+    struct thread *t = list_entry (list_front (&sleep_list), struct thread, sleep_elem);
+    if (t-> wake_up_tick > now)
+    {
+      return;
+    }
+    list_pop_front (&sleep_list);
     thread_unblock(t);
-
-    t = list_entry (list_front (&sleep_list), struct thread, sleep_elem); 
   }
 }
 
@@ -114,7 +116,6 @@ check_wake_up (void)
 void
 timer_sleep (int64_t ticks) 
 {
-  ASSERT (ticks > 0);
   int64_t start = timer_ticks ();
   struct thread *cur = thread_current ();
   enum intr_level old_level;
@@ -122,7 +123,7 @@ timer_sleep (int64_t ticks)
   ASSERT (intr_get_level () == INTR_ON);
 
   /* Don't have to sleep */
-  if (ticks == 0)
+  if (ticks <= 0)
     {
       return;
     }

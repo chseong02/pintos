@@ -158,6 +158,20 @@ compare_thread_priority(const struct list_elem *a,
   < list_entry(b, struct thread, elem)->priority;
 }
 
+/* Checks if the priority of current thread is lower than the
+   largest one in the ready list. If it's true, thread should
+   be yielded. */
+void
+thread_preempt (void)
+{
+  if(list_empty(&ready_list)) return;
+  if(thread_current()->priority < list_entry(
+    list_max(&ready_list, compare_thread_priority, NULL), 
+    struct thread, elem)->priority){
+      thread_yield();
+  }
+}
+
 /* Creates a new kernel thread named NAME with the given initial
    PRIORITY, which executes FUNCTION passing AUX as the argument,
    and adds it to the ready queue.  Returns the thread identifier

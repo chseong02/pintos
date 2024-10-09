@@ -90,6 +90,23 @@ timer_elapsed (int64_t then)
   return timer_ticks () - then;
 }
 
+/* Wake up the thread that needs to wake up by iterating sleep_list */
+void
+check_wake_up (void)
+{
+  // TODO: assert하면 좋을 것들 추가
+  int64_t now = timer_ticks ();
+  struct thread *t = list_entry (list_front (&sleep_list), struct thread, sleep_elem);
+
+  while (t->wake_up_tick <= now)
+  {
+    t = list_pop_front (&sleep_list);
+    thread_unblock(t);
+    
+    t = list_entry (list_front (&sleep_list), struct thread, sleep_elem); 
+  }
+}
+
 /* Sleeps for approximately TICKS timer ticks.  Interrupts must
    be turned on. */
 void
@@ -115,6 +132,7 @@ timer_sleep (int64_t ticks)
 
   intr_set_level (old_level);
 
+  // TODO: have to delete
   while (timer_elapsed (start) < ticks) 
     thread_yield ();
 }
@@ -274,8 +292,8 @@ static bool
 wake_up_tick_less (const struct list_elem *a_, const struct list_elem *b_,
             void *aux UNUSED) 
 {
-  const struct thread *a = list_entry (a_, struct thread, elem);
-  const struct thread *b = list_entry (b_, struct thread, elem);
+  const struct thread *a = list_entry (a_, struct thread, sleep_elem);
+  const struct thread *b = list_entry (b_, struct thread, sleep_elem);
   
   return a->wake_up_tick < b->wake_up_tick;
 }

@@ -33,6 +33,8 @@ static bool too_many_loops (unsigned loops);
 static void busy_wait (int64_t loops);
 static void real_time_sleep (int64_t num, int32_t denom);
 static void real_time_delay (int64_t num, int32_t denom);
+static bool wake_up_tick_less (const struct list_elem *, const struct list_elem *,
+                        void *);
 
 /* Sets up the timer to interrupt TIMER_FREQ times per second,
    and registers the corresponding interrupt. */
@@ -102,7 +104,7 @@ check_wake_up (void)
   {
     t = list_pop_front (&sleep_list);
     thread_unblock(t);
-    
+
     t = list_entry (list_front (&sleep_list), struct thread, sleep_elem); 
   }
 }
@@ -133,8 +135,8 @@ timer_sleep (int64_t ticks)
   intr_set_level (old_level);
 
   // TODO: have to delete
-  while (timer_elapsed (start) < ticks) 
-    thread_yield ();
+  // while (timer_elapsed (start) < ticks) 
+  //   thread_yield ();
 }
 
 /* Sleeps for approximately MS milliseconds.  Interrupts must be

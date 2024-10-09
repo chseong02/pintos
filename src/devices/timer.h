@@ -1,6 +1,7 @@
 #ifndef DEVICES_TIMER_H
 #define DEVICES_TIMER_H
 
+#include <list.h>
 #include <round.h>
 #include <stdint.h>
 #include <stdbool.h>
@@ -30,8 +31,4 @@ void timer_print_stats (void);
 /* Wake up the thread that needs to wake up. */
 void check_wake_up (void);
 
-/* Compare function for sleep_list */
-typedef bool wake_up_tick_less (const struct list_elem *a,
-                             const struct list_elem *b,
-                             void *aux);
 #endif /* devices/timer.h */

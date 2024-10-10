@@ -225,6 +225,10 @@ thread_create (const char *name, int priority,
 
   /* Add to run queue. */
   thread_unblock (t);
+  
+  /* Try to yield if the priority of current thread is not
+  the largest one */
+  thread_preempt();
 
   return tid;
 }
@@ -361,6 +365,9 @@ void
 thread_set_priority (int new_priority) 
 {
   thread_current ()->priority = new_priority;
+  /* Try to yield if the priority of current thread is not
+  the largest one */
+  thread_preempt();
 }
 
 /* Returns the current thread's priority. */
@@ -518,7 +525,11 @@ next_thread_to_run (void)
   if (list_empty (&ready_list))
     return idle_thread;
   else
-    return list_entry (list_pop_front (&ready_list), struct thread, elem);
+    /* choose a thread with maximum priority and pop it from 
+    ready_list */
+    return list_entry (
+      list_pop_max (&ready_list, compare_thread_priority, NULL), 
+      struct thread, elem);
 }
 
 /* Completes a thread switch by activating the new thread's page

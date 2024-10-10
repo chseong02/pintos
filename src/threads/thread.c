@@ -11,6 +11,7 @@
 #include "threads/switch.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
+#include "devices/timer.h"
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
@@ -133,6 +134,9 @@ thread_tick (void)
 #endif
   else
     kernel_ticks++;
+
+  /* Check the thread that needs to wake up. */
+  check_wake_up();
 
   /* Enforce preemption. */
   if (++thread_ticks >= TIME_SLICE)
@@ -494,6 +498,7 @@ init_thread (struct thread *t, const char *name, int priority)
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
+  t->wake_up_tick = 0;
   t->magic = THREAD_MAGIC;
 
   old_level = intr_disable ();

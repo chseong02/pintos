@@ -1,4 +1,9 @@
 #include <stdint.h>
+/* FP32: Fixed-point number type
+    0    00000000000000000 00000000000000
+    |    |    Decimal    | | Fractional |
+    sign +---(17 bits)---+ +-(14 bits)--+
+*/
 
 /* 1 << 14 = 16384 */
 #define FIXED_POINT_F 16384

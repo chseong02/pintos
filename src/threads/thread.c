@@ -511,6 +511,12 @@ init_thread (struct thread *t, const char *name, int priority)
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
   t->wake_up_tick = 0;
+  if (thread_mlfqs){
+    thread_refresh_mlfqs_priority(t);
+  }
+  else {
+    t->priority = priority;
+  }
   t->magic = THREAD_MAGIC;
 
   old_level = intr_disable ();

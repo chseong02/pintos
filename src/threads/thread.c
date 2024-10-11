@@ -379,7 +379,8 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
-  thread_current ()->priority = new_priority;
+  thread_current ()->base_priority = new_priority;
+  thread_update_priority();
   /* Try to yield if the priority of current thread is not
   the largest one */
   thread_preempt();

@@ -502,7 +502,7 @@ init_thread (struct thread *t, const char *name, int priority)
   t->magic = THREAD_MAGIC;
 
   t->lock_to_acquire = NULL;
-  list_init(&(t->donors));
+  list_init(&t->donors);
   t->base_priority = priority;
 
   old_level = intr_disable ();
@@ -623,6 +623,18 @@ allocate_tid (void)
 
   return tid;
 }
+
+/* Performs a nested priority donation from current thread. */
+void nested_donation(void)
+{
+  struct thread *current = thread_current();
+  for(int iter = 0; iter < MAX_NEST_DEPTH; iter++){
+    if(current->lock_to_acquire == NULL) break;
+    current->lock_to_acquire->holder->priority = current->priority;
+    current = current->lock_to_acquire->holder;
+  }
+}
+
 
 /* Offset of `stack' member within `struct thread'.
    Used by switch.S, which can't figure it out on its own. */

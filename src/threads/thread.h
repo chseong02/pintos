@@ -24,6 +24,9 @@ typedef int tid_t;
 #define PRI_DEFAULT 31                  /* Default priority. */
 #define PRI_MAX 63                      /* Highest priority. */
 
+/* Maximum depth of nested priority donation. */
+#define MAX_NEST_DEPTH 8
+
 /* A kernel thread or user process.
 
    Each thread structure is stored in its own 4 kB page.  The
@@ -99,6 +102,7 @@ struct thread
     struct lock *lock_to_acquire;
     struct list donors;
     int base_priority;
+    struct list_elem priority_elem;
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
@@ -150,5 +154,6 @@ bool compare_thread_priority(const struct list_elem *a,
                              void *aux UNUSED);
 
 void thread_preempt (void);
+void nested_donation(void);
 
 #endif /* threads/thread.h */

@@ -198,7 +198,15 @@ lock_acquire (struct lock *lock)
   ASSERT (!intr_context ());
   ASSERT (!lock_held_by_current_thread (lock));
 
+  struct thread *current = thread_current();
+  if(lock->holder != NULL){
+    current->lock_to_acquire = lock;
+    list_push_back(&lock->holder->donors, &current->priority_elem);
+    nested_donation();
+  }
+
   sema_down (&lock->semaphore);
+  current->lock_to_acquire = NULL;
   lock->holder = thread_current ();
 }
 

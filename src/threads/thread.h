@@ -96,6 +96,10 @@ struct thread
     
     struct list_elem sleep_elem;        /* List element for sleep threads list */
 
+    struct lock *lock_to_acquire;
+    struct list donors;
+    int base_priority;
+
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */

@@ -435,6 +435,23 @@ thread_get_recent_cpu (void)
 {
   return FP32_INT_MUL(thread_current ()->recent_cpu, 100);
 }
+void
+refresh_load_avg ()
+{
+  fp32 load_avg_ratio;
+  fp32 ready_threads_ratio;
+  fp32 load_avg_part;
+  fp32 ready_threads_part;
+  int ready_threads_number;
+  ready_threads_number = list_size(&ready_list) + 1;
+  load_avg_ratio = FP32_INT_DIV(FP32_TO_FP(59),60);
+  ready_threads_ratio = FP32_INT_DIV(FP32_TO_FP(59),60);
+  load_avg_part = FP32_FP32_MUL(load_avg_ratio,load_avg);
+  ready_threads_part = FP32_INT_MUL(ready_threads_ratio,ready_threads_number);
+  
+  load_avg = load_avg_part + ready_threads_part;
+}
+
 
 /* Idle thread.  Executes when no other thread is ready to run.
 

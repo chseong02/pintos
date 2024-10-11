@@ -394,6 +394,15 @@ thread_set_nice (int nice)
   /* Not yet implemented. */
 }
 
+int
+thread_refresh_mlfqs_priority (struct thread *t)
+{
+  int nice = t->nice;
+  fp32 recent_cpu = t->recent_cpu;
+  t->priority = PRI_MAX - FP32_TO_INT(FP32_INT_DIV(recent_cpu, 4)) - nice * 2;
+  return t->priority;
+}
+
 /* Returns the current thread's nice value. */
 int
 thread_get_nice (void) 

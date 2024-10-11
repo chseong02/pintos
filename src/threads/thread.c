@@ -647,6 +647,26 @@ nested_donation(void)
   }
 }
 
+void
+thread_update_priority(void)
+{
+  struct thread *current = thread_current();
+  int base = current->base_priority;
+  int max_priority_in_donors = PRI_MIN;
+  if(!list_empty(&current->donors)){
+    max_priority_in_donors = list_entry(
+      list_max(
+        &current->donors, 
+        compare_donation_priority, 
+        NULL), 
+      struct thread, 
+      donation_elem)->priority;
+  }
+  
+  current->priority = base > max_priority_in_donors ? base 
+                    : max_priority_in_donors;
+}
+
 
 /* Offset of `stack' member within `struct thread'.
    Used by switch.S, which can't figure it out on its own. */

@@ -241,7 +241,24 @@ lock_release (struct lock *lock)
   ASSERT (lock != NULL);
   ASSERT (lock_held_by_current_thread (lock));
 
+  /* Delete the threads from donors who required this lock */
   lock->holder = NULL;
+  struct list *donors  = &thread_current()->donors;
+  struct list_elem *iter;
+  for(iter = list_begin(donors); 
+      iter != list_end(donors); 
+      iter = list_next(iter))
+  {
+    if(list_entry(iter, struct thread, donation_elem)
+      ->lock_to_acquire == lock)
+    {
+      list_remove(&list_entry(iter, struct thread, donation_elem)
+      ->donation_elem);
+    }
+  }
+
+  thread_update_priority();
+
   sema_up (&lock->semaphore);
 }
 

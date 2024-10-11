@@ -61,6 +61,8 @@ static unsigned thread_ticks;   /* # of timer ticks since last yield. */
 bool thread_mlfqs;
 
 /* BSD Scheduler */
+/* Average number of threads that were in the "ready" and "running" states 
+   over the past minute. */
 static fp32 load_avg;
 
 static void kernel_thread (thread_func *, void *aux);
@@ -403,16 +405,14 @@ thread_get_nice (void)
 int
 thread_get_load_avg (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  return FP32_INT_MUL (load_avg, 100);
 }
 
 /* Returns 100 times the current thread's recent_cpu value. */
 int
 thread_get_recent_cpu (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  return FP32_INT_MUL(thread_current ()->recent_cpu, 100);
 }
 
 /* Idle thread.  Executes when no other thread is ready to run.

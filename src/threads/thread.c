@@ -162,6 +162,17 @@ compare_thread_priority(const struct list_elem *a,
   < list_entry(b, struct thread, elem)->priority;
 }
 
+/* Compares priority of thread a and b, return true if priority
+   of a is smaller than b. */
+bool
+compare_donation_priority(const struct list_elem *a,
+                             const struct list_elem *b,
+                             void *aux UNUSED)
+{
+  return list_entry(a, struct thread, donation_elem)->priority
+  < list_entry(b, struct thread, donation_elem)->priority;
+}
+
 /* Checks if the priority of current thread is lower than the
    largest one in the ready list. If it's true, thread should
    be yielded. */
@@ -625,7 +636,8 @@ allocate_tid (void)
 }
 
 /* Performs a nested priority donation from current thread. */
-void nested_donation(void)
+void
+nested_donation(void)
 {
   struct thread *current = thread_current();
   for(int iter = 0; iter < MAX_NEST_DEPTH; iter++){

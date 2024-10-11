@@ -102,7 +102,7 @@ struct thread
     struct lock *lock_to_acquire;
     struct list donors;
     int base_priority;
-    struct list_elem priority_elem;
+    struct list_elem donation_elem;
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
@@ -154,6 +154,11 @@ bool compare_thread_priority(const struct list_elem *a,
                              void *aux UNUSED);
 
 void thread_preempt (void);
-void nested_donation(void);
+void nested_donation (void);
+void thread_update_priority (void);
+
+bool compare_donation_priority(const struct list_elem *a,
+                              const struct list_elem *b,
+                              void *aux UNUSED);
 
 #endif /* threads/thread.h */

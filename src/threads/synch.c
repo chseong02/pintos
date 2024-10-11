@@ -201,7 +201,7 @@ lock_acquire (struct lock *lock)
   struct thread *current = thread_current();
   if(lock->holder != NULL){
     current->lock_to_acquire = lock;
-    list_push_back(&lock->holder->donors, &current->priority_elem);
+    list_push_back(&lock->holder->donors, &current->donation_elem);
     nested_donation();
   }
 

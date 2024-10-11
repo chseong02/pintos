@@ -390,8 +390,20 @@ thread_get_priority (void)
 void
 thread_set_nice (int nice) 
 {
-  thread_current ()->nice = nice;
-  /* Not yet implemented. */
+  enum intr_level old_level;
+  old_level = intr_disable ();
+
+  struct thread *cur = thread_current ();
+  int priority;
+  int first_ready_priority;
+  cur->nice = nice;
+  priority = thread_refresh_mlfqs_priority(cur);
+  first_ready_priority = list_entry (list_front (&ready_list), struct thread, elem)
+    ->priority;
+  if(priority < first_ready_priority){
+    thread_yield();
+  }
+  intr_set_level (old_level);
 }
 
 int

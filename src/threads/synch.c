@@ -336,3 +336,25 @@ cond_broadcast (struct condition *cond, struct lock *lock)
   while (!list_empty (&cond->waiters))
     cond_signal (cond, lock);
 }
+
+/* Compares priority of semaphore a and b, return true if 
+   priority of the biggest thread in the waiters list of a is 
+   smaller than the one of b. */
+bool
+compare_sema_priority(const struct list_elem *a,
+                             const struct list_elem *b,
+                             void *aux UNUSED)
+{
+  struct semaphore_elem 
+  *sema_a = list_entry(a, struct semaphore_elem, elem),
+  *sema_b = list_entry(b, struct semaphore_elem, elem);
+
+  struct list_elem
+  *max_a = list_max(&(sema_a->semaphore.waiters), 
+                      compare_thread_priority, NULL),
+  *max_b = list_max(&(sema_b->semaphore.waiters), 
+                      compare_thread_priority, NULL);
+
+  return list_entry(max_a, struct thread, elem)->priority
+  < list_entry(max_b, struct thread, elem)->priority;
+}

@@ -398,8 +398,8 @@ thread_set_nice (int nice)
   int first_ready_priority;
   cur->nice = nice;
   priority = thread_refresh_mlfqs_priority(cur);
-  first_ready_priority = list_entry (list_front (&ready_list), struct thread, elem)
-    ->priority;
+  first_ready_priority = list_entry (list_pop_max (&ready_list, compare_thread_priority, NULL), 
+    struct thread, elem)->priority;
   if(priority < first_ready_priority){
     thread_yield();
   }
@@ -426,14 +426,14 @@ thread_get_nice (void)
 int
 thread_get_load_avg (void) 
 {
-  return FP32_INT_MUL (load_avg, 100);
+  return FP32_TO_INT_ROUND(FP32_INT_MUL (load_avg, 100));
 }
 
 /* Returns 100 times the current thread's recent_cpu value. */
 int
 thread_get_recent_cpu (void) 
 {
-  return FP32_INT_MUL(thread_current ()->recent_cpu, 100);
+  return FP32_TO_INT_ROUND(FP32_INT_MUL(thread_current ()->recent_cpu, 100));
 }
 
 void
@@ -479,11 +479,11 @@ refresh_load_avg ()
   int ready_threads_number;
   ready_threads_number = list_size(&ready_list) + 1;
   load_avg_ratio = FP32_INT_DIV(FP32_TO_FP(59),60);
-  ready_threads_ratio = FP32_INT_DIV(FP32_TO_FP(59),60);
+  ready_threads_ratio = FP32_INT_DIV(FP32_TO_FP(1),60);
   load_avg_part = FP32_FP32_MUL(load_avg_ratio,load_avg);
   ready_threads_part = FP32_INT_MUL(ready_threads_ratio,ready_threads_number);
   
-  load_avg = load_avg_part + ready_threads_part;
+  load_avg = FP32_FP32_ADD(load_avg_part, ready_threads_part);
 }
 
 void
@@ -583,6 +583,8 @@ init_thread (struct thread *t, const char *name, int priority)
   t->stack = (uint8_t *) t + PGSIZE; 
   t->wake_up_tick = 0;
   if (thread_mlfqs){
+    t->nice=0;
+    t->recent_cpu = 0;
     thread_refresh_mlfqs_priority(t);
   }
   else {

@@ -452,6 +452,15 @@ refresh_load_avg ()
   load_avg = load_avg_part + ready_threads_part;
 }
 
+void
+refresh_recent_cpu (struct thread *t)
+{
+  fp32 coefficient;
+  coefficient = FP32_INT_MUL(load_avg, 2);
+  coefficient = FP32_FP32_DIV(coefficient,FP32_INT_ADD(coefficient,1));
+  t->recent_cpu = FP32_INT_ADD(FP32_FP32_MUL(coefficient,t->recent_cpu),t->nice);
+}
+
 
 /* Idle thread.  Executes when no other thread is ready to run.
 

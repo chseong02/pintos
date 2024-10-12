@@ -242,11 +242,10 @@ lock_release (struct lock *lock)
 {
   ASSERT (lock != NULL);
   ASSERT (lock_held_by_current_thread (lock));
-
+/* Delete the threads from donors who required this lock */
+  lock->holder = NULL;
   if(!thread_mlfqs)
   {
-  /* Delete the threads from donors who required this lock */
-  lock->holder = NULL;
   struct list *donors  = &thread_current()->donors;
   struct list_elem *iter;
   for(iter = list_begin(donors); 

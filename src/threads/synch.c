@@ -197,16 +197,18 @@ lock_acquire (struct lock *lock)
   ASSERT (lock != NULL);
   ASSERT (!intr_context ());
   ASSERT (!lock_held_by_current_thread (lock));
-
   struct thread *current = thread_current();
-  if(lock->holder != NULL){
-    current->lock_to_acquire = lock;
-    list_push_back(&lock->holder->donors, &current->donation_elem);
-    nested_donation();
+  if(!thread_mlfqs){
+    if(lock->holder != NULL){
+      current->lock_to_acquire = lock;
+      list_push_back(&lock->holder->donors, &current->donation_elem);
+      nested_donation();
+    }
   }
 
   sema_down (&lock->semaphore);
-  current->lock_to_acquire = NULL;
+  if(!thread_mlfqs)
+    current->lock_to_acquire = NULL;
   lock->holder = thread_current ();
 }
 
@@ -241,6 +243,8 @@ lock_release (struct lock *lock)
   ASSERT (lock != NULL);
   ASSERT (lock_held_by_current_thread (lock));
 
+  if(!thread_mlfqs)
+  {
   /* Delete the threads from donors who required this lock */
   lock->holder = NULL;
   struct list *donors  = &thread_current()->donors;
@@ -258,6 +262,8 @@ lock_release (struct lock *lock)
   }
 
   thread_update_priority();
+  }
+
 
   sema_up (&lock->semaphore);
 }

@@ -435,6 +435,40 @@ thread_get_recent_cpu (void)
 {
   return FP32_INT_MUL(thread_current ()->recent_cpu, 100);
 }
+
+void
+thread_mlfqs_tick (int64_t ticks)
+{
+  enum intr_level old_level = intr_disable ();
+  
+  struct thread *cur = thread_current ();
+  struct list_elem *item;
+  struct thread *item_thread;
+  if(cur != idle_thread)
+    cur->recent_cpu = FP32_INT_ADD(cur->recent_cpu,1);
+
+  if(ticks % TIMER_FREQ == 0)
+  {
+    refresh_load_avg();
+    for(item = list_begin(&all_list); item != list_end(&all_list); item=list_next(item))
+    {
+      item_thread = list_entry (item, struct thread, allelem);
+      refresh_recent_cpu(item_thread);
+    }
+  }
+
+  if(ticks % 4 == 0)
+  {
+    for(item = list_begin(&all_list); item != list_end(&all_list); item=list_next(item))
+    {
+      item_thread = list_entry (item, struct thread, allelem);
+      thread_refresh_mlfqs_priority(item_thread);
+    }
+  }
+  intr_set_level (old_level);
+}
+
+
 void
 refresh_load_avg ()
 {

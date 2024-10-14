@@ -418,9 +418,12 @@ thread_set_nice (int nice)
   intr_set_level (old_level);
 }
 
-int
+/* Update priority of the received thread based on MLFQS */
+static int
 thread_refresh_mlfqs_priority (struct thread *t)
 {
+  ASSERT (intr_get_level () == INTR_OFF);
+  
   int nice = t->nice;
   fp32 recent_cpu = t->recent_cpu;
   t->priority = PRI_MAX - FP32_TO_INT(FP32_INT_DIV(recent_cpu, 4)) - nice * 2;
@@ -448,6 +451,7 @@ thread_get_recent_cpu (void)
   return FP32_TO_INT_ROUND(FP32_INT_MUL(thread_current ()->recent_cpu, 100));
 }
 
+/* Updates variables related to MLFQS such as recent_cpu, load_avg, priority */
 void
 thread_mlfqs_tick (int64_t ticks)
 {
@@ -456,9 +460,12 @@ thread_mlfqs_tick (int64_t ticks)
   struct thread *cur = thread_current ();
   struct list_elem *item;
   struct thread *item_thread;
+
+  /* idle thread must not update recent_cpu */
   if(cur != idle_thread)
     cur->recent_cpu = FP32_INT_ADD(cur->recent_cpu,1);
 
+  /* update mlfqs priority per 4 ticks */
   if(ticks % 4 == 0)
   {
     for(item = list_begin(&all_list); item != list_end(&all_list); item=list_next(item))
@@ -468,6 +475,7 @@ thread_mlfqs_tick (int64_t ticks)
     }
   }
 
+  /* update load_avg, recent_cpu priority per 1 second */
   if(ticks % TIMER_FREQ == 0)
   {
     refresh_load_avg();
@@ -478,14 +486,15 @@ thread_mlfqs_tick (int64_t ticks)
     }
   }
 
-
   intr_set_level (old_level);
 }
 
-
-void
+/* update load_avg */
+static void
 refresh_load_avg ()
 {
+  ASSERT (intr_get_level () == INTR_OFF);
+
   fp32 load_avg_ratio;
   fp32 ready_threads_ratio;
   fp32 load_avg_part;
@@ -500,9 +509,12 @@ refresh_load_avg ()
   load_avg = FP32_FP32_ADD(load_avg_part, ready_threads_part);
 }
 
-void
+/* update recent_cpu of the received thread t */
+static void
 refresh_recent_cpu (struct thread *t)
 {
+  ASSERT (intr_get_level () == INTR_OFF);
+
   fp32 coefficient;
   coefficient = FP32_INT_MUL(load_avg, 2);
   coefficient = FP32_FP32_DIV(coefficient,FP32_INT_ADD(coefficient,1));

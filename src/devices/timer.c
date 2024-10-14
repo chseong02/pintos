@@ -96,7 +96,6 @@ timer_elapsed (int64_t then)
 void
 check_wake_up (void)
 {
-  // TODO: assert하면 좋을 것들 추가
   int64_t now = timer_ticks ();
 
   while (list_empty(&sleep_list) == false)
@@ -135,10 +134,6 @@ timer_sleep (int64_t ticks)
   thread_block ();
 
   intr_set_level (old_level);
-
-  // TODO: have to delete
-  // while (timer_elapsed (start) < ticks) 
-  //   thread_yield ();
 }
 
 /* Sleeps for approximately MS milliseconds.  Interrupts must be
@@ -216,10 +211,10 @@ static void
 timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
+  
+  // mlfqs related info update
   if(thread_mlfqs)
-  {
     thread_mlfqs_tick (ticks);
-  }
   thread_tick ();
 }
 

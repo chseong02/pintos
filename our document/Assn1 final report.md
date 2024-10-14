@@ -472,14 +472,11 @@ thread_set_priority (int new_priority)
 ```
 마지막으로 현재 스레드의 우선순위를 변경하는 `thread_set_priority` 함수까지 수정해줘야 하는데, 새로운 우선순위가 `priority`가 아닌 `base_priority`를 변경하도록 한 다음 앞서 구현한 `thread_update_priority`를 호출하여 대소비교에 따라 `priority`가 변경되도록 만들어야 Priority Donation과 관련된 모든 기능이 정상적으로 동작한다.
 
-
 ### Advanced Scheduler
 모든 구현은 핀토스 레퍼런스 [B. 4.4BSD Scheduler](https://web.stanford.edu/class/cs140/projects/pintos/pintos_7.html#SEC131)을 기반으로 하였다.
-
-
-
+디자인 레포트에 작성한 구현 계획에서 크게 변경된 부분은 없으나(`load_avg` 제외) design report에 모호하게, 불분명하게 작성한 부분에 대해서 구체적으로 구현하였다.
 #### Fixed-Point Real Arithmetic
-`load_avg`와 `recent_cpu`는 실수 값을 가지는데, 일반적으로 사용되는 floating-point number는 연산이 느려 커널의 성능에 악영향을 줄 수 있기 때문에 고정 소수점 표기 방식을 이용해야만 한다. 이를 위해 `fp32` 자료형 및 이를 위한 연산 함수들을 구현하였다.
+Advanced Scheduler에서 사용하는 `load_avg`와 `recent_cpu`는 실수 값을 가지는데, 일반적으로 사용되는 floating-point number는 연산이 느려 커널의 성능에 악영향을 줄 수 있기 때문에 고정 소수점 표기 방식을 이용해야만 한다. 이를 위해 `fp32` 자료형 및 이를 위한 연산 함수들을 구현하였다.
 
 `fp32`는 디자인 레포트에서 채택한 다음 32비트의 fixed point 자료형 구조를 동일하게 채택하였으며 그 구현 또한 디자인 레포트에 명시된 바와 같다.
 ```c
@@ -514,7 +511,7 @@ Fixed-Point 자료형의 명칭은 `fp32`으로 정하였고 이는 fixed-point 
 #define FP32_FP32_DIV(A, B)    (((int64_t) A) * FIXED_POINT_F / B)
 #define FP32_INT_DIV(A, B)     (A / B)
 ```
-다음과 같이 int와 fp32 간 변환, fp32와 fp32간 사칙연산, fp32와 int간 사칙연산을 구현하였다.
+다음과 같이 int와 fp32 간 변환, fp32와 fp32간 사칙연산, fp32와 int간 사칙연산 매크로를 구현하였다.
 이는 Pintos Reference(B. 4.4BSD Scheduler, B.6 Fixed-Point Real Arithmetic)에서 명시한 방식을 참고하여 동일하게 구현하였다.
 #### `load_avg`
 ```c
@@ -523,12 +520,233 @@ Fixed-Point 자료형의 명칭은 `fp32`으로 정하였고 이는 fixed-point 
    over the past minute. */
 static fp32 load_avg;
 ```
-`thread.c`에 `load_avg` 변수를 추가하였다. 
+`thread.c`에 위에서 선언한 fixed point인 `fp32` 자료형의 `load_avg` 변수를 추가하였다. `load_avg`는 지난 1분 동안 ready하거나 running한 thread의 이동 평균으로 1초마다 재계산하여 갱신한다. 해당 변수는 BSS 초기화 때 0으로 함께 초기화된다.
+*design report에는 해당 변수를 각 `thread`에 속하는 변수로 생각하였으나 해당 변수는 global variable로 모든 스레드가 공통으로 사용하는 공통 변수로 구현하였다.*
 
+`load_avg`는 다음 공식으로 계산된다.
+$$
+\text{load\_avg} = (59/60)* \text{load\_avg} +(1/60)*\text{ready\_threads}
+$$
+여기서 ready_threads는 계산하는 시점에 `status`가 `THREAD_READY` 또는 `THREAD_RUNNING`인 스레드의 개수로 이 때, `idle_thread`는 제외이다.
+```c
+static void
+refresh_load_avg ()
+{
+  ASSERT (intr_get_level () == INTR_OFF);
+
+  fp32 load_avg_ratio;
+  fp32 ready_threads_ratio;
+  fp32 load_avg_part;
+  fp32 ready_threads_part;
+  int ready_threads_number;
+  ready_threads_number = list_size (&ready_list) + (thread_current()!=idle_thread?1:0);
+  load_avg_ratio = FP32_INT_DIV (FP32_TO_FP(59), 60);
+  ready_threads_ratio = FP32_INT_DIV (FP32_TO_FP(1), 60);
+  load_avg_part = FP32_FP32_MUL (load_avg_ratio, load_avg);
+  ready_threads_part = FP32_INT_MUL (ready_threads_ratio, ready_threads_number);
+  
+  load_avg = FP32_FP32_ADD (load_avg_part, ready_threads_part);
+}
+```
+`load_avg`를 재계산하는 유일한 함수인 `refresh_load_avg`를 `thread.c`에 추가하였다. 
+
+load_avg 및 MLFQS 관련 함수는 interrupt가 disable된 상태에서 업데이트되길 기대하므로 interrupt disabled에 대한 assert를 추가하였다. `ready_threads_number = list_size (&ready_list) + (thread_current()!=idle_thread?1:0);`를 통해 공식 내 ready_threads를 구한다.`ready_list`의 길이를 얻어 현재 ready 중인 스레드의 개수를 얻는다. 
+- `idle_thread`는 running이 아니면 block 상태이기 때문에 현재 실행하고 있는 스레드가 idle_thread인지 확인하여 그렇다면ready_threads에 포함시키지 말고 idle_thread가 아니라면 ready_threads에 포함시켜준다.
+먼저 공식의 두 항에 곱할 계수를 앞서 구현한 `fp32`의 사칙연산 매크로를 호출하여 `load_avg_ratio`, `ready_threads_ratio`에 계산한다.
+이후 공식의 각 항을 `load_avg_part`, `ready_threads_part`에 계산하고 이를 더해줘 나온 값을 `load_avg`에 덮어 씌운다. 이로써 `load_avg`를 업데이트하였다.
 #### recent_cpu
-#### priority
-#### tick
+```c
+struct thread
+  {
+    ...
+    int nice;                           /* Nice (for MLFQS) */
+    fp32 recent_cpu;                    /* The CPU ticks recently used by the thread. */
+    struct list_elem allelem;           /* List element for all threads list. */
+    ...
+    /* Owned by thread.c. */
+    unsigned magic;                     /* Detects stack overflow. */
+  };
+```
+다음과 같이 `struct thread`에 `fp32` 자료형의 `recent_cpu`를 추가해 주었다.
+`recent_cpu`는 각 개별 thread에 종속되는 변수로 해당 스레드가 최근에 cpu를 사용한 tick에 대한 moving weighted average이다. **해당 스레드가 cpu를 점유하고 running 할 때, tick마다 1씩 증가시킨다.(1씩 증가하는 코드는 뒤에서 설명하도록 하겠다)** 또한 1초(`TIMER_FREQ` tick )마다 아래 계산에 의해 재계산된다. 
+$$
+\text{recent\_cpu}=(2*load\_avg)/(2*load\_avg+1)*recent\_cpu + nice
+$$
+```c
+static void
+refresh_recent_cpu (struct thread *t)
+{
+  ASSERT (intr_get_level () == INTR_OFF);
 
+  fp32 coefficient;
+  coefficient = FP32_INT_MUL (load_avg, 2);
+  coefficient = FP32_FP32_DIV (coefficient, FP32_INT_ADD(coefficient, 1));
+  t->recent_cpu = FP32_INT_ADD (FP32_FP32_MUL(coefficient, t->recent_cpu), t->nice);
+}
+```
+위의 공식을 적용해 입력 받은 `thread` `t`의 `recent_cpu`를 업데이트하는 함수인 `refresh_recent_cpu(t)`를 `thread.c`에 추가하였다.
+overflow을 방지하기 위해 `recent_cpu`의 계수 먼저 계산하여 `coefficient`에 넣어준다.
+`coefficient`를 해당 스레드의 `recent_cpu`에 곱한 뒤 해당 스레드의 `nice` 값을 곱해 스레드`t`의 `recent_cpu`에 덮어 씌운다.
+해당 함수 역시 계산 중 다른 스레드로 넘어가서는 안되기 때문에 interrupt 비활성화 여부를 확인한다.
+#### nice
+```c
+struct thread
+  {
+    ...
+    int nice;                           /* Nice (for MLFQS) */
+    fp32 recent_cpu;                    /* The CPU ticks recently used by the thread. */
+    struct list_elem allelem;           /* List element for all threads list. */
+    ...
+    /* Owned by thread.c. */
+    unsigned magic;                     /* Detects stack overflow. */
+  };
+```
+다음과 같이 `struct thread`에 `int` 자료형의 `nice`를 추가해 주었다.
+`nice`는 각 개별 thread에 종속되는 변수로 해당 스레드가 다른 스레드에 cpu를 얼마나 잘 양보하는지에 대한 정보를 담고 있다. 값이 클수록 더 양보를 잘하는 것을 의미한다. 해당 nice 값은 내부적으로 계산하는 값이 아닌 테스트 및 프로그램에서 `thread_set_nice` 함수를 호출하여 직접 설정해주는 것이다. 이렇게 설정된 `nice` 값은 `priority`, `recent_cpu` 을 계산하는데 함께 사용된다.
+#### priority
+앞서 priority scheduling을 위해 변경한 구현들에 의해 priority scheduling이 적용되어 스케줄링된다. 하지만 앞서 구현한 priority scheduling과 다르게 MLFQS는 priority donation을 하지 않고 `nice`, `recent_cpu` 에 따라 직접 `priority`를 결정, 변경하여 스케줄링을 조절한다.
+`priority`는 4tick마다 주기적으로 아래 공식에 따라 계산되어 업데이트된다.
+$$
+priority = PRI\_MAX-(recent\_cpu/4)-(nice*2)
+$$
+```c
+static int
+thread_refresh_mlfqs_priority (struct thread *t)
+{ 
+  int nice = t->nice;
+  fp32 recent_cpu = t->recent_cpu;
+  t->priority = PRI_MAX - FP32_TO_INT(FP32_INT_DIV(recent_cpu, 4)) - nice * 2;
+  return t->priority;
+}
+```
+이처럼 해당 공식에 맞추어 매개변수로 주어진 스레드의 `priority`를 업데이트하고 이를 반환하는 함수인 `thread_refresh_mlfqs_priority`를 추가하였다. 입력받은 스레드 `t`의 `recent_cpu`, `nice` 를 사용해 공식에 맞추어 fp32의 사칙연산 매크로를 이용해 priority를 계산하여 해당 스레드 `t`의 `priority`에 업데이트해준다. 그리고 이 값을 반환한다.
+- 이 때 주의할 점은 block된 스레드, 또는 생성 중인 스레드가 아닌 이상 해당 함수는 interrupt를 비활성화한 상태로 실행되어야 한다. 생성 중인 스레드에 대한 priority 연산은 interrupt disabled가 필수가 아니므로 interrupt disabled을 별도로 검사하지는 않았다.
+
+```c
+static void
+init_thread (struct thread *t, const char *name, int priority)
+{
+  ...
+  t->priority = priority;
+
+  if (thread_mlfqs)
+  {
+    t->nice = 0;
+    t->recent_cpu = 0;
+    thread_refresh_mlfqs_priority (t);
+  }
+
+  t->magic = THREAD_MAGIC;
+  ...
+}
+```
+새로 생성된 스레드의 정보를 초기화하는 `thread.c`의 `init_thread`에서 `thread_mlfqs`가 참이라면 mlfqs 관련 스레드 변수를 초기화하는 함수를 추가하였다.
+`thread_mlfqs`는 커맨드에 의해 설정된 MLFQS 사용 여부를 담은 변수이다. 즉 참일 때는 MLFQS를 사용하는 경우, 거짓이면 MLFQS를 사용하지 않는 것을 의미한다.
+`thread_mlfqs`가 참이라면 초기화하려는 스레드`t`의 `nice`, `recent_cpu` 값을 0으로 초기화하고 `thread_refresh_mlfqs_priority`를 통해 스레드 priority를 업데이트해준다. 만약 `thread_mlfqs`가 거짓이라면 `init_thread`의 매개변수로 넣어준 값을 사용하여 초기화한다.
+#### `thread_set_nice`
+위에서 본 것처럼 priority는 스레드의 `recent_cpu`, `nice` 값에 의존한다. 만일 `nice` 값이 변경된다면 `priority` 또한 변경되게 되고 `priority` 변경에 의해 스위칭이 일어나야할 수도 있다. 이를 고려한 함수가 `thread_set_nice`이다.
+```c
+void
+thread_set_nice (int nice) 
+{
+  enum intr_level old_level;
+  old_level = intr_disable ();
+
+  struct thread *cur = thread_current ();
+  int priority;
+  int first_ready_priority;
+  cur->nice = nice;
+  priority = thread_refresh_mlfqs_priority(cur);
+  first_ready_priority = list_entry (list_max (&ready_list, compare_thread_priority, NULL), 
+    struct thread, elem)->priority;
+  if(priority < first_ready_priority){
+    thread_yield();
+  }
+  intr_set_level (old_level);
+}
+```
+`thread.c`에 `thread_set_nice(int nice)`를 구현하였다. 해당 함수는 현재 해당 함수를 실행한 스레드의 `nice` 값을 설정하는 함수이다. 이 때 현재 실행 중인 스레드의 `nice`를 변경하는 것 뿐만 아니라 변경된 `nice`로 인한 `priority`를 재계산하고 이에 의해 priority 순위가 변경되어 스레드 스위칭이 일어나야한다면 현재 스레드를 yield하여 이를 진행하는 함수이다.
+
+먼저 해당 함수는 `nice`, `priority` 값을 변경하고 switching 또한 야기할 수 있다. 이 과정 중 interrupt에 의해 다른 스레드로 변경되면 안되기에 먼저 `interrupt`를 비활성화한다. 이후 매개변수로 받은 `nice` 값으로 현재 스레드의 `nice`를 변경해주고 `thread_refresh_mlfqs_priority`를 통해 현재 실행 중인 스레드의 `priority`를 업데이트해준다. 이 후 ready 상태인 스레드들을 담은 `ready_list` 중 가장 큰 값을 가진 스레드의 priority르 얻는다. 이후 ready thread 중 가장 큰 priority와 현재 스레드의 priority를 비교해 현재 스레드가 더 작다면 `thread_yield`를 통해 cpu를 양보한다. yield된 이후 다시 현재 스레드로 switch된다면 interrupt level을 되돌리는 코드부터 실행한다.
+#### `thread_mlfqs_tick` 
+mlfqs를 사용할 때, timer interrupt가 발생한 tick마다 호출되어 MLFQS 관련 변수를 업데이트하는 함수인 `thread_mlfqs_tick`을 추가하였다.
+```c
+void
+thread_mlfqs_tick (int64_t ticks)
+{
+  enum intr_level old_level = intr_disable ();
+  
+  struct thread *cur = thread_current ();
+
+  /* idle thread must not update recent_cpu */
+  if(cur != idle_thread)
+    cur->recent_cpu = FP32_INT_ADD(cur->recent_cpu, 1);
+
+  /* update mlfqs priority per 4 ticks */
+  if(ticks % 4 == 0)
+  {
+    thread_foreach (thread_refresh_mlfqs_priority, 0);
+  }
+
+  /* update load_avg, recent_cpu priority per 1 second */
+  if(ticks % TIMER_FREQ == 0)
+  {
+    refresh_load_avg ();
+    thread_foreach (refresh_recent_cpu, 0);
+  }
+
+  intr_set_level (old_level);
+}
+```
+먼저 interrupt를 disable한다. 
+- 해당 함수 실행 중 다른 스레드로 전환되어 다른 스레드의 실행으로 인해 `nice`,`priority` 값 등이 변경시 정상적인 처리가 되지 않을 수 있다.
+이후 현재 해당 함수를 실행 중인 스레드의 `recent_cpu`를 1 증가 시켜준다. *이 때 해당 함수를 실행한 스레드가 `idle_thread`라면 증가시키지 않는다.*
+입력 받은 `ticks`이 4로 나누어 떨어진다면(입력 받은 tick은 현재 시간 tick임을 가정한다. 4tick 마다) 모든 스레드(running, ready 중인 모든 스레드, 즉 `all_list`에 있는 스레드 모두)에 대해서 `thread_refresh_mlfqs_priority`를 통해 `priority`를 업데이트한다. 
+이후 `ticks`가 `TIMER_FREQ`로 나누어 떨어지면, 즉 정확히 1초 간격이라면 `refresh_load_avg`를 통해 `load_avg`를 업데이트하고 모든 스레드에 대해 `refersh_recent_cpu`를 통해 `recent_cpu`를 업데이트한다.
+
+`recent_cpu`, `priority`, `load_avg`의 업데이트 순서는 여러 번의 테스트 시도를 통해 모든 테스트를 통과하는 순서로 결정하였다.
+- 문서 내 명확히 명시된 순서가 없다.
+마지막으로 interrupt level을 복구한다.
+
+```c
+static void
+timer_interrupt (struct intr_frame *args UNUSED)
+{
+  ticks++;
+  
+  // mlfqs related info update
+  if(thread_mlfqs)
+    thread_mlfqs_tick (ticks);
+  thread_tick ();
+}
+```
+Timer interrupt handler 함수인 `timer_interrupt`에서 `thread_mlfqs`가 참일때, MLFQS를 사용할 때 `thread_mlfqs_tick`를 호출하여 tick마다 MLFQS 관련 정보를 업데이트하도록 하게 하였다.
+
+#### 그 외 interface 함수들
+```c
+int
+thread_get_nice (void) 
+{
+  return thread_current ()->nice;
+}
+```
+현재 스레드의 `nice` 값을 출력하는 함수
+```c
+int
+thread_get_load_avg (void) 
+{
+  return FP32_TO_INT_ROUND(FP32_INT_MUL (load_avg, 100));
+}
+```
+fp32 매크로를 이용하여 현재 `load_avg`에 100을 곱한 값을 int로 round하여 반환하는 함수
+```c
+int
+thread_get_recent_cpu (void) 
+{
+  return FP32_TO_INT_ROUND(FP32_INT_MUL(thread_current ()->recent_cpu, 100));
+}
+```
+fp32 매크로를 이용하여 현재 스레드의 `recent_cpu`에 100을 곱한 값을 int로 round하여 반환하는 함수
 
 
 ## 발전한 점

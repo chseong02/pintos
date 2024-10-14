@@ -768,7 +768,6 @@ MLFQS, Advanced scheduler는 기존 round-robin 스케줄러와 다르게 `nice`
 
 ## 한계
 `struct thread`에 `wake_up_tick`, `sleep_elem`을 추가하며 Device 중 하나인 Timer와 Thread가 강하게 엮여 있는 코드 의존성을 가지게 된다. 이런 코드 의존성은 timer가 변경되었을 때 `thread`의 변화까지 야기한다. `thread`로부터 해당 변수들을 완벽히 분리하여 alarm clock 및 sleep을 구현할 수 있으면 더 좋았을 것이다.
-정렬된 순서로 sleep list
 
 Priority Donation의 도입부에서 design과는 다르게 의도적으로 스레드 리스트를 우선순위에 따른 정렬 상태로 관리하지 않았다는 점을 언급했다. 정렬 상태를 유지하여 관리할 때와 하지 않을 때의 시간 복잡도를 나타내면 다음과 같다.
 | |Insert|Find|Delete|Modify|

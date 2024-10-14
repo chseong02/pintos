@@ -764,6 +764,8 @@ Thread A --> Timer Interrupt Handler --> Thread C
 
 또한 모든 스레드를 동일한 시간의 CPU를 사용하여 돌아가며 처리하던 기존의 FIFO 방식의 스레드 스케줄링을 Priority Scheduling을 통해 각 스레드에 우선순위를 부여하여 중요한 작업이 비교적 먼저 실행될 수 있도록 변경하였고, 이를 구현하며 발생하는 부가적인 문제인 Multiple Donation과 Nested Donation에 대한 처리 역시 성공적으로 마칠 수 있었다. 이를 구현함으로써 유저 프로그램 혹은 커널이 매긴 스레드 우선순위에 기반하여 이전보다 더 효율적으로 CPU 자원을 사용하는 것이 가능해졌다.
 
+MLFQS, Advanced scheduler는 기존 round-robin 스케줄러와 다르게 `nice`를 통해 해당 스레드가 cpu를 얼마나 잘 양보해줘도 되는지 설정하여 적절하게 스레드가 스케줄링되도록 조절할 수 있었다. 또한 `recent_cpu`를 통해 어떤 스레드가 실행한 시간이 길어질수록, cpu를 점유한 시간이 길어질수록 priority를 내려가 공평하게 스케줄링되도록 조절되었다. 이는 어떤 작업을 하든 상관없이 모든 스레드를 번갈아가며 실행하는 기존 round-robin 구현에 비해 합리적인 작동 방식이다.
+
 ## 한계
 `struct thread`에 `wake_up_tick`, `sleep_elem`을 추가하며 Device 중 하나인 Timer와 Thread가 강하게 엮여 있는 코드 의존성을 가지게 된다. 이런 코드 의존성은 timer가 변경되었을 때 `thread`의 변화까지 야기한다. `thread`로부터 해당 변수들을 완벽히 분리하여 alarm clock 및 sleep을 구현할 수 있으면 더 좋았을 것이다.
 정렬된 순서로 sleep list

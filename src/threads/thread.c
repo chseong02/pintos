@@ -79,7 +79,7 @@ static tid_t allocate_tid (void);
 
 static int thread_refresh_mlfqs_priority (struct thread *);
 static void refresh_load_avg (void);
-static void refresh_recent_Cpu (struct thread *);
+static void refresh_recent_cpu (struct thread *);
 
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in

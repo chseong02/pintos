@@ -467,26 +467,26 @@ thread_mlfqs_tick (int64_t ticks)
 
   /* idle thread must not update recent_cpu */
   if(cur != idle_thread)
-    cur->recent_cpu = FP32_INT_ADD(cur->recent_cpu,1);
+    cur->recent_cpu = FP32_INT_ADD(cur->recent_cpu, 1);
 
   /* update mlfqs priority per 4 ticks */
   if(ticks % 4 == 0)
   {
-    for(item = list_begin(&all_list); item != list_end(&all_list); item=list_next(item))
+    for(item = list_begin (&all_list); item != list_end (&all_list); item = list_next (item))
     {
       item_thread = list_entry (item, struct thread, allelem);
-      thread_refresh_mlfqs_priority(item_thread);
+      thread_refresh_mlfqs_priority (item_thread);
     }
   }
 
   /* update load_avg, recent_cpu priority per 1 second */
   if(ticks % TIMER_FREQ == 0)
   {
-    refresh_load_avg();
-    for(item = list_begin(&all_list); item != list_end(&all_list); item=list_next(item))
+    refresh_load_avg ();
+    for(item = list_begin (&all_list); item != list_end (&all_list); item = list_next (item))
     {
       item_thread = list_entry (item, struct thread, allelem);
-      refresh_recent_cpu(item_thread);
+      refresh_recent_cpu (item_thread);
     }
   }
 
@@ -504,13 +504,13 @@ refresh_load_avg ()
   fp32 load_avg_part;
   fp32 ready_threads_part;
   int ready_threads_number;
-  ready_threads_number = list_size(&ready_list) + (thread_current()!=idle_thread?1:0);
-  load_avg_ratio = FP32_INT_DIV(FP32_TO_FP(59),60);
-  ready_threads_ratio = FP32_INT_DIV(FP32_TO_FP(1),60);
-  load_avg_part = FP32_FP32_MUL(load_avg_ratio,load_avg);
-  ready_threads_part = FP32_INT_MUL(ready_threads_ratio,ready_threads_number);
+  ready_threads_number = list_size (&ready_list) + (thread_current()!=idle_thread?1:0);
+  load_avg_ratio = FP32_INT_DIV (FP32_TO_FP(59), 60);
+  ready_threads_ratio = FP32_INT_DIV (FP32_TO_FP(1), 60);
+  load_avg_part = FP32_FP32_MUL (load_avg_ratio, load_avg);
+  ready_threads_part = FP32_INT_MUL (ready_threads_ratio, ready_threads_number);
   
-  load_avg = FP32_FP32_ADD(load_avg_part, ready_threads_part);
+  load_avg = FP32_FP32_ADD (load_avg_part, ready_threads_part);
 }
 
 /* update recent_cpu of the received thread t */
@@ -520,9 +520,9 @@ refresh_recent_cpu (struct thread *t)
   ASSERT (intr_get_level () == INTR_OFF);
 
   fp32 coefficient;
-  coefficient = FP32_INT_MUL(load_avg, 2);
-  coefficient = FP32_FP32_DIV(coefficient,FP32_INT_ADD(coefficient,1));
-  t->recent_cpu = FP32_INT_ADD(FP32_FP32_MUL(coefficient,t->recent_cpu),t->nice);
+  coefficient = FP32_INT_MUL (load_avg, 2);
+  coefficient = FP32_FP32_DIV (coefficient, FP32_INT_ADD(coefficient, 1));
+  t->recent_cpu = FP32_INT_ADD (FP32_FP32_MUL(coefficient, t->recent_cpu), t->nice);
 }
 
 
@@ -612,14 +612,15 @@ init_thread (struct thread *t, const char *name, int priority)
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE; 
   t->wake_up_tick = 0;
-  if (thread_mlfqs){
-    t->nice=0;
+  t->priority = priority;
+
+  if (thread_mlfqs)
+  {
+    t->nice = 0;
     t->recent_cpu = 0;
-    thread_refresh_mlfqs_priority(t);
+    thread_refresh_mlfqs_priority (t);
   }
-  else {
-    t->priority = priority;
-  }
+
   t->magic = THREAD_MAGIC;
 
   t->lock_to_acquire = NULL;

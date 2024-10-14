@@ -167,6 +167,318 @@ thread_tick (void)
 ```
 다음처럼 Timer interrupt가 발생하면 핸들러 함수인 `timer_interrupt`에 의해 실행되는 `thread_tick`에 `check_wake_up()`을 추가하여 **틱마다** 현재 wake up 해야할 스레드가 있는지 확인하고 wake up할 수 있도록 하였다.
 
+### Priority Scheduler
+기존 Design report에서 변경된 점이 있는데, 우선순위를 기준으로 스레드를 나열해야 하는 `thread/ready_list`, `synch/sema->waiters`에서 **우선순위 기준 정렬을 유지한 채로 관리하지 않았다.** 따라서 가장 높은 우선순위의 스레드를 고르려면 매번 리스트를 처음부터 끝까지 순회하며 해당하는 스레드를 찾아야 하는데, 이와 같이 구현한 이유는 **최악의 경우 Priority Donation이 일어날 때마다 임의의 리스트에서의 정렬 상태가 깨질 가능성이 있기 때문**이다. 따라서 위의 경우 Priority Donation이 일어날 때마다 해당 스레드들과 관여된 모든 리스트들을 재정렬해줘야 한다. 정렬 상태를 유지하여 관리할 때와 하지 않을 때의 시간 복잡도를 나타내면 다음과 같다.
+| |Insert|Find|Delete|Modify|
+|--|--|--|--|--|
+|정렬O|`O(n)`|`O(1)`|`O(1)`|`O(nlogn)`|
+|정렬X|`O(1)`|`O(n)`|`O(n)`|`O(1)`|
+
+따라서 두 구현 방식의 성능 차이는 리스트 삽입, 탐색, 삭제, 변경 연산이 각각 얼마나 일어나는지에 따라 달라진다. 이번 Assn 1의 경우 만들고자 하는 OS의 일부 기능들이 제대로 구현되었는지를 시험하는 테스트들이 대부분이었으므로 어느 한 쪽의 구현 방식이 절대적으로 좋다고 결론 짓기에는 어렵고, 추후 조금 더 일반적인 사용 상황을 가정하는 테스트 케이스를 이용하여 벤치마킹을 수행할 때 두 구현 방식의 성능이 어떻게 달리지는지 비교해볼 계획이다.
+
+#### Basic implementation
+
+`[threads/thread.c]`
+```c
+/* Compares priority of thread a and b, return true if priority
+   of a is smaller than b. */
+bool
+compare_thread_priority(const struct list_elem *a,
+                             const struct list_elem *b,
+                             void *aux UNUSED)
+{
+  return list_entry(a, struct thread, elem)->priority
+  < list_entry(b, struct thread, elem)->priority;
+}
+```
+`ready_list` 내에서 우선순위에 따른 스레드 비교를 위한 함수. 인자로 주어진 `list_elem`이 들어있는 스레드가 무엇인지 `list_entry`를 이용해 찾아낸 뒤 `priority`를 참조하여 비교한다.
+
+
+`[threads/thread.c]`
+```c
+/* Checks if the priority of current thread is lower than the
+   largest one in the ready list. If it's true, thread should
+   be yielded. */
+void
+thread_preempt (void)
+{
+  if(list_empty(&ready_list)) return;
+  if(thread_current()->priority < list_entry(
+    list_max(&ready_list, compare_thread_priority, NULL), 
+    struct thread, elem)->priority){
+      thread_yield();
+  }
+}
+```
+현재 실행 중인 스레드 혹은 대기중인 스레드의 우선순위가 바뀌어 실행 중인 스레드의 우선순위가 가장 높지 않을 가능성이 생겼을 경우 CPU를 넘겨주는 함수이다. `thread_create`와 `thread_set_priority`, `sema_up`의 마지막에서 호출해준다.
+
+
+`[lib/kernel/list.c]`
+```c
+/* Removes the element in LIST with the largest value according
+  to LESS and returns it. Undefined behavior if LIST is empty 
+  before removal. */
+struct list_elem *
+list_pop_max (struct list *list, list_less_func *less, void *aux)
+{
+  struct list_elem *max = list_max (list, less, aux);
+  list_remove (max);
+  return max;
+}
+
+/* Removes the element in LIST with the smallest value according
+  to LESS and returns it. Undefined behavior if LIST is empty 
+  before removal. */
+struct list_elem *
+list_pop_min (struct list *list, list_less_func *less, void *aux)
+{
+  struct list_elem *min = list_min (list, less, aux);
+  list_remove (min);
+  return min;
+}
+```
+리스트 연산의 편의를 위해 추가한 함수들. 해당 리스트에서 `less` 비교함수에 의해 결정된 최댓값/최솟값을 가지는 원소를 리스트에서 삭제 후 반환한다. 구현 시 유의해야 했던 점으로 `list_remove` 함수는 삭제한 원소가 아닌 삭제한 원소의 **다음 원소**를 반환하므로 `list_remove`의 반환값을 그대로 반환하면 예상치 못한 동작이 수행될 수 있다.
+
+`[threads/thread.c]`
+```c
+static struct thread *
+next_thread_to_run (void) 
+{
+  if (list_empty (&ready_list))
+    return idle_thread;
+  else
+    /* choose a thread with maximum priority and pop it from 
+    ready_list */
+    return list_entry (
+      list_pop_max (&ready_list, compare_thread_priority, NULL), 
+      struct thread, elem);
+}
+```
+다음 스케줄할 스레드를 뽑는 `next_thread_to_run` 함수는 `list_pop_front`를 이용하여 리스트의 가장 앞에서 FIFO 형태로 고르는 기존 방식 대신 위에서 구현한 `list_pop_max` 함수를 이용하여 우선순위가 가장 높은 스레드를 pop해 반환해주도록 수정하였다.
+
+`[threads/synch.c]`
+```c
+void
+sema_up (struct semaphore *sema) 
+{
+  ...
+  if (!list_empty (&sema->waiters)) 
+    thread_unblock (list_entry (
+      list_pop_max (&sema->waiters, compare_thread_priority, NULL),
+                    struct thread, elem));
+  sema->value++;
+  thread_preempt();
+  intr_set_level (old_level);
+}
+```
+Semaphore 역시 멤버 변수로 현재 `sema_down`을 시도한 스레드들을 담아 관리하는 `waiters` 리스트가 있고 이 역시 스레드 우선순위에 따라 관리되어야 하므로, 리스트에서 스레드를 꺼낼 때 `list_pop_max` 함수를 통해 우선순위가 가장 높은 스레드를 pop해야 한다.
+
+`[threads/synch.c]`
+```c
+/* Compares priority of semaphore a and b, return true if 
+   priority of the biggest thread in the waiters list of a is 
+   smaller than the one of b. */
+bool
+compare_sema_priority(const struct list_elem *a,
+                             const struct list_elem *b,
+                             void *aux UNUSED)
+{
+  struct semaphore_elem 
+  *sema_a = list_entry(a, struct semaphore_elem, elem),
+  *sema_b = list_entry(b, struct semaphore_elem, elem);
+
+  struct list_elem
+  *max_a = list_max(&(sema_a->semaphore.waiters), 
+                      compare_thread_priority, NULL),
+  *max_b = list_max(&(sema_b->semaphore.waiters), 
+                      compare_thread_priority, NULL);
+
+  return list_entry(max_a, struct thread, elem)->priority
+  < list_entry(max_b, struct thread, elem)->priority;
+}
+```
+Conditional Variable 역시 앞의 경우와 마찬가지로 `cond_signal`에서 우선순위에 따라 pop할 원소를 선택해야 하지만, 위의 경우들과는 달리 이번에는 비교할 원소가 스레드가 아닌 Semaphore이다. 각 Semaphore 역시 앞서 살펴봤듯이 스레드의 리스트를 관리하고 있으므로, `cond_signal`에 필요한 `list_pop_max`의 동작은 **해당 Conditional Variable의 waiters 리스트에 담긴 Semaphore들이 관리 중인 모든 스레드들 중 가장 우선순위가 높은 스레드가 담겨 있는 Semaphore를 pop**하는 것으로 정리할 수 있다. 따라서 이를 구현하기 위해 두 Semaphore에 담긴 스레드들의 최대 우선순위를 비교하는 `compare_sema_priority` 비교함수를 구현하였다.
+
+`[threads/synch.c]`
+```c
+void
+cond_signal (struct condition *cond, struct lock *lock UNUSED) 
+{
+  ...
+  if (!list_empty (&cond->waiters)) 
+    sema_up (&list_entry (
+          list_pop_max (&cond->waiters, compare_sema_priority, NULL),
+          struct semaphore_elem, elem)->semaphore);
+}
+```
+위의 비교함수를 이용하여 가장 우선순위가 높은 스레드가 들어있는 Semaphore를 pop하도록 `cond_signal` 함수를 수정하였다.
+
+지금까지의 구현 사항을 적용함으로써 기본적인 스레드 우선순위 동작을 구현할 수 있었다.
+
+#### Priority Donation
+
+Priority Donation을 구현하기 위해선 `lock_acquire`시 해당 lock을 보유 중인 스레드에게 자신의 우선순위를 전해주고 이를 재귀적으로 일정 깊이만큼 반복하는 동작 (Nested Donation), `lock_release`시 자신이 해당 lock을 이유로 Donate 받았던 우선순위를 반납한 뒤 남은 우선순위들을 토대로 자신의 우선순위를 갱신하는 동작 (Multiple Donation)을 구현해야 한다.
+
+`[threads/thread.h]`
+```c
+struct lock *lock_to_acquire;
+struct list donors;
+int base_priority;
+struct list_elem donation_elem;
+```
+스레드 구조체에 다음과 같은 멤버 변수들을 추가해줬다. `*lock_to_acquire`은 `lock_acquire`를 통해 자신이 acquire를 시도한 lock을 나타낸다. `donors` 리스트는 자신에게 우선순위를 donate해준 스레드들의 리스트를 나타내고, `donation_elem`은 `donors` 리스트에서의 연결관계를 저장한다. 마지막으로 `base_priority`는 우선순위를 donate받기 전 스레드 자신이 가지고 있던 우선순위를 나타낸다.
+
+이때 기존의 `elem`을 재사용하지 않고 `donation_elem`을 새로 정의하는데, Priority Donation을 구현함으로써 스레드가 `ready_list` (혹은 동일한 `elem`을 사용하는 `sema->waiters`)와 `donors`에 동시에 들어있을 수 있기 때문에 리스트의 연결관계를 나타내는 `list_elem` 역시 따로 선언해줘야 한다.
+
+`[threads/thread.c]`
+```c
+static void
+init_thread (struct thread *t, const char *name, int priority)
+{
+  ...
+  t->lock_to_acquire = NULL;
+  list_init(&t->donors);
+  t->base_priority = priority;
+  ...
+}
+```
+추가한 멤버 변수들은 `init_thread`에서 초기화한다. `donation_elem`을 비롯한 `list_elem`들은 초기값이 크게 중요하지 않고 리스트에서 관리되기 때문에 따로 초기화하지 않았다.
+
+`[threads/thread.c]`
+```c
+/* Compares priority of thread a and b, return true if priority
+   of a is smaller than b. */
+bool
+compare_donation_priority(const struct list_elem *a,
+                             const struct list_elem *b,
+                             void *aux UNUSED)
+{
+  return list_entry(a, struct thread, donation_elem)->priority
+  < list_entry(b, struct thread, donation_elem)->priority;
+}
+```
+`donation_elem`을 비교하기 위한 비교함수 역시 재사용이 불가하므로 별개로 선언해줘야 한다.
+
+`[threads/synch.c]`
+```c
+void
+lock_acquire (struct lock *lock)
+{
+  ...
+  struct thread *current = thread_current();
+  if(!thread_mlfqs){
+    if(lock->holder != NULL){
+      current->lock_to_acquire = lock;
+      list_push_back(&lock->holder->donors, &current->donation_elem);
+      nested_donation();
+    }
+  }
+
+  sema_down (&lock->semaphore);
+  if(!thread_mlfqs)
+    current->lock_to_acquire = NULL;
+  lock->holder = thread_current ();
+}
+```
+`[threads/thread.c]`
+```c
+/* Performs a nested priority donation from current thread. */
+void
+nested_donation(void)
+{
+  struct thread *current = thread_current();
+  for(int iter = 0; iter < MAX_NEST_DEPTH; iter++){
+    if(current->lock_to_acquire == NULL) break;
+    current->lock_to_acquire->holder->priority = current->priority;
+    current = current->lock_to_acquire->holder;
+  }
+}
+```
+다음과 같이 Nested Donation을 구현하였다. `lock_acquire`를 실행할 시 이미 해당 lock을 다른 스레드가 보유 중이라면 자신의 `lock_to_acquire`를 갱신해주고 해당 lock을 보유 중인 스레드의 `donors` 리스트에 자신을 추가한다. 그 뒤 `nested_donation`을 실행해 재귀적으로 자신의 우선순위가 전해지도록 만든다.
+
+`nested_donation`은 `lock_acquire`를 실행한 현재 스레드인 `thread_current()`부터 시작하여 `lock_to_acquire->holder`를 바탕으로 다음 스레드를 찾아 우선순위를 전파한다. 현재 보고 있는 스레드가 더이상 lock을 요청하지 않을 때까지, 혹은 명시적으로 선언된 최대 전파 깊이인 `MAX_NEST_DEPTH`만큼 전파되었을 경우 Nested Donation을 종료한다.
+
+추가로 구현한 Advanced Scheduler는 Priority Donation 기능을 사용하지 않으므로 `thread_mlfqs` 플래그를 이용하여 해당 기능의 실행을 막았다.
+
+`[threads/thread.h]`
+```c
+/* Maximum depth of nested priority donation. */
+#define MAX_NEST_DEPTH 8
+```
+위에서 사용된 `MAX_NEST_DEPTH`는 다음과 같이 정의하였다.
+
+`[threads/synch.c]`
+```c
+void
+lock_release (struct lock *lock) 
+{
+  ASSERT (lock != NULL);
+  ASSERT (lock_held_by_current_thread (lock));
+/* Delete the threads from donors who required this lock */
+  lock->holder = NULL;
+  if(!thread_mlfqs)
+  {
+    struct list *donors  = &thread_current()->donors;
+    struct list_elem *iter;
+    for(iter = list_begin(donors); 
+        iter != list_end(donors); 
+        iter = list_next(iter))
+    {
+      if(list_entry(iter, struct thread, donation_elem)
+        ->lock_to_acquire == lock)
+      {
+        list_remove(&list_entry(iter, struct thread, donation_elem)
+        ->donation_elem);
+      }
+    }
+    thread_update_priority();
+  }
+  sema_up (&lock->semaphore);
+}
+```
+`lock_release`를 실행하게 되면 현재 스레드에게 우선순위를 donate해준 스레드들의 리스트인 `donors`를 순회하며 해당 lock을 이유로 우선순위를 donate해준 스레드들을 리스트에서 모두 삭제해준다. 그 후 `thread_update_priority`를 호출해 현재 스레드의 우선순위를 donate받은 우선순위를 반납한 후의 새로운 값으로 갱신해준다.
+
+Advanced Scheduler는 앞서 설명한 바와 같이 Priority Donation이 일어나지 않으므로 해당 기능 역시 `thread_mlfqs` 플래그를 통해 실행을 막았다.
+
+`[threads/thread.c]`
+```c
+void
+thread_update_priority(void)
+{
+  struct thread *current = thread_current();
+  int base = current->base_priority;
+  int max_priority_in_donors = PRI_MIN;
+  if(!list_empty(&current->donors)){
+    max_priority_in_donors = list_entry(
+      list_max(
+        &current->donors, 
+        compare_donation_priority, 
+        NULL), 
+      struct thread, 
+      donation_elem)->priority;
+  }
+  
+  current->priority = base > max_priority_in_donors ? base 
+                    : max_priority_in_donors;
+}
+```
+위의 `lock_release`에서 호출한 `thread_update_priority`는 현재 스레드의 원래의 우선순위인 `base_priority`와 `donors`들에게서 받은 우선순위들의 최댓값(`max_priority_in_donors`) 중 더 큰 쪽을 사용하도록 구현하였다.
+
+`[threads/thread.c]`
+```c
+void
+thread_set_priority (int new_priority) 
+{
+  thread_current ()->base_priority = new_priority;
+  thread_update_priority();
+  /* Try to yield if the priority of current thread is not
+  the largest one */
+  thread_preempt();
+}
+```
+마지막으로 현재 스레드의 우선순위를 변경하는 `thread_set_priority` 함수까지 수정해줘야 하는데, 새로운 우선순위가 `priority`가 아닌 `base_priority`를 변경하도록 한 다음 앞서 구현한 `thread_update_priority`를 호출하여 대소비교에 따라 `priority`가 변경되도록 만들어야 Priority Donation과 관련된 모든 기능이 정상적으로 동작한다.
+
+
 ### Advanced Scheduler
 모든 구현은 핀토스 레퍼런스 [B. 4.4BSD Scheduler](https://web.stanford.edu/class/cs140/projects/pintos/pintos_7.html#SEC131)을 기반으로 하였다.
 

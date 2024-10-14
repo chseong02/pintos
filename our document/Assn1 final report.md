@@ -750,7 +750,17 @@ fp32 매크로를 이용하여 현재 스레드의 `recent_cpu`에 100을 곱한
 
 
 ## 발전한 점
-기존 busy wait으로 구현된 `timer_sleep`을 block, unblock을 이용한 구현으로 변경하면서 thread swtich 과정을 하나 감소킬 수 있었다. 또한 이는 스케줄링을 할 때도 이점이 있다. 자는건 빠지니까
+기존 busy wait으로 구현된 `timer_sleep`을 block, unblock을 이용한 구현으로 변경하면서 thread swtich 과정을 하나 감소킬 수 있었다. busy wait이였던 기존 구현의 경우 스레드B가 sleep중일 때 다음처럼 작동하였다.
+```
+Thread A --> Timer Interrupt Handler --> Thread B --(yield)--> Thread C
+```
+block, unblock을 이용한 개선한 현재 구현의 경우 다음처럼 작동한다.
+```
+Thread A --> Timer Interrupt Handler --> Thread C
+```
+즉 스위칭이 1회 감소한다. 
+이는 단발성으로 스위칭이 1회만 감소하는 것이 아니다. 만일 round-robin scheduler을 사용하고 스레드가 2개라고 하고 한 스레드가 sleep 중일 때, 기존 구현이라면 4 tick 마다 sleep하고 있는 thread로 switch 되므로 4tick마다 쓸모없는 스위칭이 발생한다. 하지만 현재 변경한 구현에서는 그렇지 않다.
+기존 구현은 priority scheduler 사용시에도 큰 문제다. 큰 priority를 가진 thread가 sleep 중이라면 sleep 중인 동안 계속 cpu를 점유할 것이다. 하지만 변경된 구현에서는 sleep시 block되므로 cpu를 점유하지 않아 해당 문제가 발생하지 않는다.
 
 또한 모든 스레드를 동일한 시간의 CPU를 사용하여 돌아가며 처리하던 기존의 FIFO 방식의 스레드 스케줄링을 Priority Scheduling을 통해 각 스레드에 우선순위를 부여하여 중요한 작업이 비교적 먼저 실행될 수 있도록 변경하였고, 이를 구현하며 발생하는 부가적인 문제인 Multiple Donation과 Nested Donation에 대한 처리 역시 성공적으로 마칠 수 있었다. 이를 구현함으로써 유저 프로그램 혹은 커널이 매긴 스레드 우선순위에 기반하여 이전보다 더 효율적으로 CPU 자원을 사용하는 것이 가능해졌다.
 

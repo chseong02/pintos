@@ -425,9 +425,7 @@ thread_set_nice (int nice)
 /* Update priority of the received thread based on MLFQS */
 static int
 thread_refresh_mlfqs_priority (struct thread *t)
-{
-  ASSERT (intr_get_level () == INTR_OFF);
-  
+{ 
   int nice = t->nice;
   fp32 recent_cpu = t->recent_cpu;
   t->priority = PRI_MAX - FP32_TO_INT(FP32_INT_DIV(recent_cpu, 4)) - nice * 2;
@@ -462,8 +460,6 @@ thread_mlfqs_tick (int64_t ticks)
   enum intr_level old_level = intr_disable ();
   
   struct thread *cur = thread_current ();
-  struct list_elem *item;
-  struct thread *item_thread;
 
   /* idle thread must not update recent_cpu */
   if(cur != idle_thread)
@@ -472,22 +468,14 @@ thread_mlfqs_tick (int64_t ticks)
   /* update mlfqs priority per 4 ticks */
   if(ticks % 4 == 0)
   {
-    for(item = list_begin (&all_list); item != list_end (&all_list); item = list_next (item))
-    {
-      item_thread = list_entry (item, struct thread, allelem);
-      thread_refresh_mlfqs_priority (item_thread);
-    }
+    thread_foreach (thread_refresh_mlfqs_priority, 0);
   }
 
   /* update load_avg, recent_cpu priority per 1 second */
   if(ticks % TIMER_FREQ == 0)
   {
     refresh_load_avg ();
-    for(item = list_begin (&all_list); item != list_end (&all_list); item = list_next (item))
-    {
-      item_thread = list_entry (item, struct thread, allelem);
-      refresh_recent_cpu (item_thread);
-    }
+    thread_foreach (refresh_recent_cpu, 0);
   }
 
   intr_set_level (old_level);

@@ -197,9 +197,13 @@ lock_acquire (struct lock *lock)
   ASSERT (lock != NULL);
   ASSERT (!intr_context ());
   ASSERT (!lock_held_by_current_thread (lock));
+  
   struct thread *current = thread_current();
-  if(!thread_mlfqs){
-    if(lock->holder != NULL){
+  // When use mlfqs, disable donation feature
+  if(!thread_mlfqs)
+  {
+    if(lock->holder != NULL)
+    {
       current->lock_to_acquire = lock;
       list_push_back(&lock->holder->donors, &current->donation_elem);
       nested_donation();
@@ -242,27 +246,28 @@ lock_release (struct lock *lock)
 {
   ASSERT (lock != NULL);
   ASSERT (lock_held_by_current_thread (lock));
-/* Delete the threads from donors who required this lock */
+  /* Delete the threads from donors who required this lock */
   lock->holder = NULL;
+  
+  // When use mlfqs, disable donation feature
   if(!thread_mlfqs)
   {
-  struct list *donors  = &thread_current()->donors;
-  struct list_elem *iter;
-  for(iter = list_begin(donors); 
-      iter != list_end(donors); 
-      iter = list_next(iter))
-  {
-    if(list_entry(iter, struct thread, donation_elem)
-      ->lock_to_acquire == lock)
+    struct list *donors  = &thread_current()->donors;
+    struct list_elem *iter;
+    for(iter = list_begin(donors); 
+        iter != list_end(donors); 
+        iter = list_next(iter))
     {
-      list_remove(&list_entry(iter, struct thread, donation_elem)
-      ->donation_elem);
+      if(list_entry(iter, struct thread, donation_elem)
+        ->lock_to_acquire == lock)
+      {
+        list_remove(&list_entry(iter, struct thread, donation_elem)
+        ->donation_elem);
+      }
     }
-  }
 
-  thread_update_priority();
+    thread_update_priority();
   }
-
 
   sema_up (&lock->semaphore);
 }

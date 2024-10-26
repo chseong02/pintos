@@ -196,4 +196,26 @@ put_user (uint8_t *udst, uint8_t byte)
 이러한 각 함수는 사용자 주소가 이미 PHYS_BASE 아래에 있는 것으로 확인되었다고 가정합니다. 또한 커널에서 페이지 오류가 발생하면 eax를 0xffffffff로 설정하고 이전 값을 eip에 복사하도록 page_fault()를 수정했다고 가정
 
 ## Suggested Order of Implementation
+다음 작업들을 병행해 구현하는 것을 추천
+- Argument passing
+	- 이거 구현 전까지 모든 user program은 즉시 page fault 남.
+	- 당장은 `*esp = PHYS_BASE;`를 `*esp = PHYS_BASE - 12;`로 간단히 변경 가능. in `setup_stack()`
+		- argument 안쓰는 테스트에서 작동
+	- 제대로 구현 전까지는 command-line arguments 넘기지 말고 실행해야함.
+- User memory access
+	- 모든 system call은 user memory를 읽어야함.
+	- 몇몇은 쓰기도 해야함.
+- System call infrastructure
+	- user stack에서 system call number를 읽고 handler로 dispatch 하도록 코드 작성
+- The `exit` system call
+	- 모든 프로그램 정상 종료되면 `exit` 호출, `main`도 간접적으로 `exit` 호출(`_start()` in `lib/user/entry.c`)
+- The `write` system call for writing to fd 1, the system console.
+	- 모든 테스트 프로그램은 콘솔에 씀.(user process version of `printf`)
+		- `write` 가능할 때까지 오작동
+- Change `process_wait()` to an infinite loop(one that waits forever).
+	- 현재는 즉시 반환. 프로세스 실행 전에 핀토스가 꺼짐.
+- 
+
+위 완료시 user process 최소한으로 작동. 최소 콘솔에 글 쓰고 종료 가능. 
+이후 테스트 통과하게 개선해라
 ## Requirements

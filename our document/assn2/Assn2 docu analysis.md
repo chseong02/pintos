@@ -214,8 +214,71 @@ put_user (uint8_t *udst, uint8_t byte)
 		- `write` 가능할 때까지 오작동
 - Change `process_wait()` to an infinite loop(one that waits forever).
 	- 현재는 즉시 반환. 프로세스 실행 전에 핀토스가 꺼짐.
-- 
 
 위 완료시 user process 최소한으로 작동. 최소 콘솔에 글 쓰고 종료 가능. 
 이후 테스트 통과하게 개선해라
 ## Requirements
+### Process Termination Messages
+언제든 user process가 terminate되면 process 이름과 exit code를 출력해라.
+- `exit`을 호출했든, 어떤 이유든
+```c
+printf ("%s: exit(%d)\n", ...);
+```
+`process_execute()`로 pass된 full name, command-line argument는 생략
+user process가 아닌 kernel thread 종료 또는 `halt` system call 호출시에는 출력 x
+이 외 출력은 테스트를 실패시킬 수 있음.
+### Argument Passing
+현재 `process_execute()`는 새로운 process에게 argument passing을 지원하지 않음.<-- 이를 구현해라.
+단순히 파일 이름 인자 받는게 아니라 공백으로 나눠 argument 받아라.
+- 첫번째 word: program name, 두번째 word: the first argument. etc...
+- Ex: `grep foo bar` => grep, argument foo, bar
+multiple space == single space.
+command line arguments에 합리적 제한 가능
+- Ex. 한 페이지 길이
+- 하지만 핀토스 유틸리티가 사용가능한 128바이트에 의존 x
+원하는 방식으로 구문 분석해라
+- `lib/string.h`에 프로토 타입 존재, `string.c`에는 주석 있는 `strtok_r()` 참고
+- stack 설정 방법은 [3.5.1 Program Startup Details](https://web.stanford.edu/class/cs140/projects/pintos/pintos_3.html#SEC51) 참조
+
+### System Calls
+`userprog/syscall.c`에 system call handler 구현해라.
+- skeleton 구현은 system call을 terminating process 함으로써 대응.
+- system call number, system call arguments 보고 적절한 작업해야...
+
+다음 system call들을 구현해라
+- 아래는 `lib/user/syscall.h`에 포함된 프로토타입들
+- system call number는 `lib/syscall-nr.h`에 정의되 있음.
+
+문서에는 구현해야 할 엄청 많은 system call 나열되어 있음.
+
+명시되지 않은 syscall은 나중에 플젝3, 4에서 구현해라.
+system call 구현 전에는 user virtual address space에 read,write하는 것부터 만들어라.
+- system call number도 user virtual address space의 user stack에 있음...
+- 잘못된 포인터 제공시 user process 종료
+
+여러 user processs가 한 번에 호출할 수 있도록 system call을 synchronize해야 함.
+여러 스레드에서 한 번에 `filesys` 폴더의 file system 코드 접근은 안전 x
+- file system code는 critical section으로 취급해야 함.
+- `process_execute()`도 파일에 엑세스함.
+- `filesys`는 수정하지 말 것.
+
+`lib/user/syscall.c`에는 각 system call에 대한 user level function이 있다.
+- 이것들은 user process에게 system call invoke하는 방법 제공
+
+이런 작업들이 완료되면 pintos는 절대 user program에 의해 충돌, 패닉, 오작동되지 않아야 함.
+- 테스트는 온갖 방법으로 이를 방해할 거임. 코너 케이스 잘 생가해라.
+- user program이 os를 종료할 수 있는 유일한 방법: `halt` system call
+system call이 invalid argument 패스시 가능한 옵션들
+- error value return
+- return undefined value
+- terminate process
+- [3.5.2 System Call Details](https://web.stanford.edu/class/cs140/projects/pintos/pintos_3.html#SEC52) 참고
+### Denying Writes to Executables
+executable로 사용 중인 파일에 대한 쓰기를 거부해라.
+프로세스가 디스크에서 변경 중인 코드를 실행하려고 하면 unpredictable result가 발생할 수 있음.
+- 플젝3에서도 중요하지만 지금도 중요함.
+ 
+ open file에 write를 막기 위해 `file_deny_write()`를 사용
+- `file_allow_write()`를 호출하여 다시 사용 가능
+- 파일 닫으면 다시 write 됨.
+- 즉 프로세스 실행 파일에 대한 쓰기를 거부하려면 프로세스 실행 중에는 파일 열어두어야 함.

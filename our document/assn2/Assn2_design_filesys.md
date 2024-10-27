@@ -218,7 +218,7 @@ struct file
   };
 ```
 
-`file` 구조체는 OS에서 관리하는 파일들의 표현 형식으로, 기본적으로 `inode`의 wrapping class 형식으로 구현되어 있다. 추가적으로 현재까지 읽었던 파일의 오프셋인 `pos`와 수정 가능 여부에 대한 플래그인 `deny_write`가 멤버 변수로 존재한다.
+`file` 구조체는 OS에서 관리하는 파일들의 표현 형식으로 `filesys/file.c`에 구현되어있다. 기본적으로 `inode`의 wrapping class 형식을 따르고, 추가적으로 현재까지 읽었던 파일의 오프셋인 `pos`와 수정 가능 여부에 대한 플래그인 `deny_write`가 멤버 변수로 존재한다.
 
 `inode`의 `deny_write_cnt`는 `int`형으로 0 이상의 정수값을 가질 수 있도록 로직이 짜여진 반면 `file`의 `deny_write`가 `bool` 형식인 이유는 `inode`는 여러 파일들이 동시에 가리킬 수 있기 때문에 이에 대한 중복 처리가 필요하지만 각 `file`은 독립적으로 존재하기 때문이다.
 
@@ -377,14 +377,23 @@ file_allow_write (struct file *file)
 
 
 ```c
-/* Returns the size of FILE in bytes. */
-off_t
-file_length (struct file *file) 
-
 /* Sets the current position in FILE to NEW_POS bytes from the
    start of the file. */
 void
 file_seek (struct file *file, off_t new_pos)
+{
+  ASSERT (file != NULL);
+  ASSERT (new_pos >= 0);
+  file->pos = new_pos;
+}
+```
+현재 파일이 가리키고 있는 오프셋인 `file->pos`를 명시적으로 변경한다.
+
+
+```c
+/* Returns the size of FILE in bytes. */
+off_t
+file_length (struct file *file) 
 
 /* Returns the current position in FILE as a byte offset from the
    start of the file. */

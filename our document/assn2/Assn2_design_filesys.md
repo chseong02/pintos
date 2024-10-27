@@ -187,3 +187,208 @@ inode_allow_write (struct inode *inode)
 }
 ```
 Inode의 `deny_write_cnt` 플래그를 설정하고 해제할 때 호출하는 함수들. 각 opener가 `deny_write_cnt`를 최대 한 번 증가시켰을 것을 ASSERT문을 통해 약하게 검증한다. 완전히 검증하려면 `deny_write_cnt`를 설정한 opener를 리스트화시켜 관리하는 식으로 보완할 수 있을 것이라 생각한다.
+
+```c
+/* Returns INODE's inode number. */
+block_sector_t
+inode_get_inumber (const struct inode *inode)
+{
+  return inode->sector;
+}
+
+/* Returns the length, in bytes, of INODE's data. */
+off_t
+inode_length (const struct inode *inode)
+{
+  return inode->data.length;
+}
+```
+이외에 편의성을 위해 정의된 getter 함수들.
+
+
+### File
+
+```c
+/* An open file. */
+struct file 
+  {
+    struct inode *inode;        /* File's inode. */
+    off_t pos;                  /* Current position. */
+    bool deny_write;            /* Has file_deny_write() been called? */
+  };
+```
+
+`file` 구조체는 OS에서 관리하는 파일들의 표현 형식으로, 기본적으로 `inode`의 wrapping class 형식으로 구현되어 있다. 추가적으로 현재까지 읽었던 파일의 오프셋인 `pos`와 수정 가능 여부에 대한 플래그인 `deny_write`가 멤버 변수로 존재한다.
+
+`inode`의 `deny_write_cnt`는 `int`형으로 0 이상의 정수값을 가질 수 있도록 로직이 짜여진 반면 `file`의 `deny_write`가 `bool` 형식인 이유는 `inode`는 여러 파일들이 동시에 가리킬 수 있기 때문에 이에 대한 중복 처리가 필요하지만 각 `file`은 독립적으로 존재하기 때문이다.
+
+```c
+/* Opens a file for the given INODE, of which it takes ownership,
+   and returns the new file.  Returns a null pointer if an
+   allocation fails or if INODE is null. */
+struct file *
+file_open (struct inode *inode) 
+{
+  struct file *file = calloc (1, sizeof *file);
+  if (inode != NULL && file != NULL)
+    {
+      file->inode = inode;
+      file->pos = 0;
+      file->deny_write = false;
+      return file;
+    }
+  else
+    {
+      inode_close (inode);
+      free (file);
+      return NULL; 
+    }
+}
+```
+새로운 `file` 구조체를 동적할당하여 주어진 `inode`를 가리키도록 만들고 멤버 변수를 초기화해준다. 파라미터로 주어진 `inode`에 대해 함수 내에서 따로 `inode_open`이나 `inode_reopen`을 호출해주지 않는 이유가 궁금했는데, Pintos 프로젝트 내에서 `file_open`이 사용된 경우들을 확인하니 모두 함수 호출 이전에 `inode`를 미리 열어주는 식으로 구현이 되어있었다.
+
+
+```c
+/* Opens and returns a new file for the same inode as FILE.
+   Returns a null pointer if unsuccessful. */
+struct file *
+file_reopen (struct file *file) 
+{
+  return file_open (inode_reopen (file->inode));
+}
+```
+해당 파일이 가리키는 Inode를 가리키는 새로운 `file`을 생성한다. 기존 Inode는 `inode_reopen`을 통해 opener 카운트를 올려줘야 한다.
+
+
+```c
+/* Closes FILE. */
+void
+file_close (struct file *file) 
+{
+  if (file != NULL)
+    {
+      file_allow_write (file);
+      inode_close (file->inode);
+      free (file); 
+    }
+}
+```
+열린 파일을 닫는다(삭제한다). 후술할 `file_allow_write` 함수에서 `deny_write` 플래그가 설정되었을 경우에 대한 로직을 수행한 뒤, 가리키고 있던 `inode`를 닫고 `file` 구조체의 동적할당을 해제한다.
+
+
+```c
+/* Reads SIZE bytes from FILE into BUFFER,
+   starting at the file's current position.
+   Returns the number of bytes actually read,
+   which may be less than SIZE if end of file is reached.
+   Advances FILE's position by the number of bytes read. */
+off_t
+file_read (struct file *file, void *buffer, off_t size) 
+{
+  off_t bytes_read = inode_read_at (file->inode, buffer, size, file->pos);
+  file->pos += bytes_read;
+  return bytes_read;
+}
+```
+현재까지 읽은 파일의 오프셋인 `file->pos`부터 최대 `size` 바이트만큼의 정보를 `inode_read_at` 함수를 통해 읽어와 `buffer`에 저장한다. 이후 `file->pos`를 읽어온 바이트 수만큼 증가시켜준다.
+
+
+```c
+/* Reads SIZE bytes from FILE into BUFFER,
+   starting at offset FILE_OFS in the file.
+   Returns the number of bytes actually read,
+   which may be less than SIZE if end of file is reached.
+   The file's current position is unaffected. */
+off_t
+file_read_at (struct file *file, void *buffer, off_t size, off_t file_ofs) 
+{
+  return inode_read_at (file->inode, buffer, size, file_ofs);
+}
+```
+위의 `file_read`와 흡사하지만, 파일의 오프셋을 `file_ofs` 파라미터를 통해 임의로 지정 가능하다. `file->pos`는 변화시키지 않는다.
+
+
+```c
+/* Writes SIZE bytes from BUFFER into FILE,
+   starting at the file's current position.
+   Returns the number of bytes actually written,
+   which may be less than SIZE if end of file is reached.
+   (Normally we'd grow the file in that case, but file growth is
+   not yet implemented.)
+   Advances FILE's position by the number of bytes read. */
+off_t
+file_write (struct file *file, const void *buffer, off_t size) 
+{
+  off_t bytes_written = inode_write_at (file->inode, buffer, size, file->pos);
+  file->pos += bytes_written;
+  return bytes_written;
+}
+
+/* Writes SIZE bytes from BUFFER into FILE,
+   starting at offset FILE_OFS in the file.
+   Returns the number of bytes actually written,
+   which may be less than SIZE if end of file is reached.
+   (Normally we'd grow the file in that case, but file growth is
+   not yet implemented.)
+   The file's current position is unaffected. */
+off_t
+file_write_at (struct file *file, const void *buffer, off_t size,
+               off_t file_ofs) 
+{
+  return inode_write_at (file->inode, buffer, size, file_ofs);
+}
+```
+`file_read`, `file_read_at`과 동일하게 각각 현재 파일의 오프셋과 명시된 오프셋 `file_ofs`에서 시작하여, `buffer`에 있는 내용을 최대 `size` 바이트만큼 파일에 작성한다.
+
+
+```c
+/* Prevents write operations on FILE's underlying inode
+   until file_allow_write() is called or FILE is closed. */
+void
+file_deny_write (struct file *file) 
+{
+  ASSERT (file != NULL);
+  if (!file->deny_write) 
+    {
+      file->deny_write = true;
+      inode_deny_write (file->inode);
+    }
+}
+```
+현재 파일에 이미 `deny_write` 플래그가 설정되어있지 않다면 해당 플래그를 설정하고 `inode_deny_write` 함수를 호출하여 inode의 `deny_write` 카운트 역시 올려준다.
+
+
+```c
+/* Re-enables write operations on FILE's underlying inode.
+   (Writes might still be denied by some other file that has the
+   same inode open.) */
+void
+file_allow_write (struct file *file) 
+{
+  ASSERT (file != NULL);
+  if (file->deny_write) 
+    {
+      file->deny_write = false;
+      inode_allow_write (file->inode);
+    }
+}
+```
+위의 `file_deny_write`와 정확히 반대의 동작을 수행한다.
+
+
+```c
+/* Returns the size of FILE in bytes. */
+off_t
+file_length (struct file *file) 
+
+/* Sets the current position in FILE to NEW_POS bytes from the
+   start of the file. */
+void
+file_seek (struct file *file, off_t new_pos)
+
+/* Returns the current position in FILE as a byte offset from the
+   start of the file. */
+off_t
+file_tell (struct file *file)
+```
+이외에 편의성을 위해 정의된 getter 함수들.

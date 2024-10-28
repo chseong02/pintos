@@ -102,6 +102,8 @@ inode_create (block_sector_t sector, off_t length)
 - 확보에 성공할 시 임시로 만들어놨던 `inode_disk` 블럭의 내용을 `block_write` 함수를 통해 `sector` 위치의 블럭에다 복사해준 뒤, 앞서 확보한 데이터 블럭들을 `0`으로 초기화해준다.
 - 마지막으로 임시로 할당한 블럭을 `free`해주고 성공 여부를 반환한다.
 
+> `free_map` 자료구조는 디스크 상에 블럭 단위로 쪼개진 영역들을 총괄하여 관리한다. 각 블럭이 현재 할당된 상태인지 아닌지를 메모리 상의 매 bit마다 0과 1로 나타내는 `bitmap`을 할당하여 `FREE_MAP_SECTOR(0)`번 블럭에 저장하며, 이를 참조하여 각 블럭들을 할당 및 해제한다.
+
 
 ```c
 /* Reads an inode from SECTOR
@@ -355,7 +357,7 @@ file_deny_write (struct file *file)
     }
 }
 ```
-현재 파일에 이미 `deny_write` 플래그가 설정되어있지 않다면 해당 플래그를 설정하고 `inode_deny_write` 함수를 호출하여 inode의 `deny_write` 카운트 역시 올려준다.
+현재 파일에 이미 `deny_write` 플래그가 설정되어있지 않다면 해당 플래그를 설정하고, `inode_deny_write` 함수를 호출하여 inode의 `deny_write` 카운트 역시 올려준다.
 
 
 ```c
@@ -401,3 +403,128 @@ off_t
 file_tell (struct file *file)
 ```
 이외에 편의성을 위해 정의된 getter 함수들.
+
+
+### Filesys
+
+```c
+/* Partition that contains the file system. */
+struct block *fs_device;
+```
+전역으로 사용되는 파일 시스템 구조체의 포인터. `BLOCK_FILESYS` 속성을 가진 하나의 블럭으로 정의된다.
+
+
+```c
+/* Initializes the file system module.
+   If FORMAT is true, reformats the file system. */
+void
+filesys_init (bool format) 
+{
+  fs_device = block_get_role (BLOCK_FILESYS);
+  if (fs_device == NULL)
+    PANIC ("No file system device found, can't initialize file system.");
+
+  inode_init ();
+  free_map_init ();
+
+  if (format) 
+    do_format ();
+
+  free_map_open ();
+}
+```
+`BLOCK_FILESYS` 속성을 가지는 블럭의 주솟값을 받아온 뒤, inode와 free map을 초기화시켜주는 등의 초기화 작업을 진행한다.
+
+
+```c
+/* Creates a file named NAME with the given INITIAL_SIZE.
+   Returns true if successful, false otherwise.
+   Fails if a file named NAME already exists,
+   or if internal memory allocation fails. */
+bool
+filesys_create (const char *name, off_t initial_size) 
+{
+  block_sector_t inode_sector = 0;
+  struct dir *dir = dir_open_root ();
+  bool success = (dir != NULL
+                  && free_map_allocate (1, &inode_sector)
+                  && inode_create (inode_sector, initial_size)
+                  && dir_add (dir, name, inode_sector));
+  if (!success && inode_sector != 0) 
+    free_map_release (inode_sector, 1);
+  dir_close (dir);
+
+  return success;
+}
+```
+파라미터로 주어진 이름과 크기의 파일을 루트 디렉토리 아래에 생성한다.
+- 새로운 Inode를 생성할 블럭 하나를 Free map에서 할당받은 뒤 `inode_create`를 통해 해당 블럭에서 Inode를 생성한다.
+- `dir_add`를 호출하여 루트 디렉토리의 Inode 데이터에 엔트리를 추가한다.
+> ```c
+> /* A directory. */
+> struct dir 
+>   {
+>     struct inode *inode;                /* Backing store. */
+>     off_t pos;                          /* Current position. */
+>   };
+> ```
+> `directory`는 운영체제에서 파일 디렉토리를 나타내는 자료형이고, `file`과 유사하게 정보를 담고 있는 Inode와 현재까지 읽은 데이터의 오프셋으로 구성된다. 
+> 
+> 해당 Inode에는 현재 디렉토리 내부에 들어있는 파일들의 Inode 블럭 인덱스, 이름 문자열, 현재 사용중 여부가 `dir_entry` 구조체에 묶여 순차적으로 저장되고, 이를 탐색하며 디렉토리 내 파일의 존재 여부 등을 해석한다.
+>
+> Project 2에서는 subdirectory 없이 모든 파일이 루트 디렉토리 바로 아래에 존재한다고 가정하여 별다른 수정이 필요 없지만, 추후 파일명을 파싱하여 대응되는 subdirectory로 이동하는 방식으로 개선이 필요할 것으로 보인다.
+
+```c
+/* Opens the file with the given NAME.
+   Returns the new file if successful or a null pointer
+   otherwise.
+   Fails if no file named NAME exists,
+   or if an internal memory allocation fails. */
+struct file *
+filesys_open (const char *name)
+{
+  struct dir *dir = dir_open_root ();
+  struct inode *inode = NULL;
+
+  if (dir != NULL)
+    dir_lookup (dir, name, &inode);
+  dir_close (dir);
+
+  return file_open (inode);
+}
+```
+루트 디렉토리에 있는 파일 중 이름이 `name`인 파일을 찾아 연다.
+
+
+```c
+/* Deletes the file named NAME.
+   Returns true if successful, false on failure.
+   Fails if no file named NAME exists,
+   or if an internal memory allocation fails. */
+bool
+filesys_remove (const char *name) 
+{
+  struct dir *dir = dir_open_root ();
+  bool success = dir != NULL && dir_remove (dir, name);
+  dir_close (dir); 
+
+  return success;
+}
+```
+루트 디렉토리 아래에 있는 파일 중 이름이 `name`인 파일을 삭제한다. 메모리 영역을 초기화하는 대신 해당 `dir_entry`의 `in_use` 플래그를 해제하고 가리키던 파일의 Inode를 삭제한다.
+
+
+```c
+/* Formats the file system. */
+static void
+do_format (void)
+{
+  printf ("Formatting file system...");
+  free_map_create ();
+  if (!dir_create (ROOT_DIR_SECTOR, 16))
+    PANIC ("root directory creation failed");
+  free_map_close ();
+  printf ("done.\n");
+}
+```
+앞서 설명한 `filesys_init`에서 `format` 플래그가 설정되어있을 시 실행되는 함수. 새로운 free map을 생성한 뒤 1번 블럭에 16개의 파일 정보를 담을 수 있는 루트 디렉토리를 생성한다. 

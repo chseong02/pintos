@@ -1048,10 +1048,339 @@ page fault가 일어나게 한 가상 주소는 CR2 레지스터에 저장되어
 마지막으로 `kill`을 호출해 user process를 죽인다.
 page fault의 exception 핸들링과 관련해 가상 메모리를 올바르게 구현을 완료하기 위해서는 해당 함수를 수정해야 할 필요가 있다. 
 
+### Interrupt
+#### `idt`
+```c
+static uint64_t idt[INTR_CNT];
+```
+IDT(Interrupt Descriptor Table)을 저장하는 리스트 변수, `intr-stubs.S`에 있는 256개의 x86 interrupt stub과 연결하는 Gate를 저장한다. `intr_init`에서 초기화된다.
 
+#### `intr_handlers`
+```c
+static intr_handler_func *intr_handlers[INTR_CNT];
+```
+`idt`에 있는 각 interrupt에 대한 intr handler function을 담은 리스트
+
+#### `intr_level`
+```c
+enum intr_level 
+  {
+    INTR_OFF,             /* Interrupts disabled. */
+    INTR_ON               /* Interrupts enabled. */
+  };
+```
+Interrupt 활성화, 비활성화 여부를 표현하는 enum
+
+#### `intr_get_level`
+```c
+enum intr_level
+intr_get_level (void) 
+{
+  uint32_t flags;
+
+  /* Push the flags register on the processor stack, then pop the
+     value off the stack into `flags'.  See [IA32-v2b] "PUSHF"
+     and "POP" and [IA32-v3a] 5.8.1 "Masking Maskable Hardware
+     Interrupts". */
+  asm volatile ("pushfl; popl %0" : "=g" (flags));
+
+  return flags & FLAG_IF ? INTR_ON : INTR_OFF;
+}
+```
+processor stack에 flag register를 넣고 pop시켜 flag에 저장하여 flag 값을 확인하여 현재 Interrupt 활성화 여부를 `intr_level`로 반환하는 함수
+
+#### `intr_set_level`
+```c
+enum intr_level
+intr_set_level (enum intr_level level) 
+{
+  return level == INTR_ON ? intr_enable () : intr_disable ();
+}
+```
+입력 받은 `intr_level`에 따라 `intr_enable` 또는 `intr_disable`을 통해 interrupt 활성화 여부를 조절하는 함수
+
+#### `intr_enable`
+```c
+enum intr_level
+intr_enable (void) 
+{
+  enum intr_level old_level = intr_get_level ();
+  ASSERT (!intr_context ());
+
+  /* Enable interrupts by setting the interrupt flag.
+
+     See [IA32-v2b] "STI" and [IA32-v3a] 5.8.1 "Masking Maskable
+     Hardware Interrupts". */
+  asm volatile ("sti");
+
+  return old_level;
+}
+```
+> interrupt 를 enable하고 변경 전 원래의 interrupt level을 `intr_level`꼴로 반환하는 함수
+
+external interrupt를 처리하고 있지 않을 때 실행되어야 한다.
+`sti` 어셈블리를 통해 interrupt flag를 설정함으로써 interrupt를 허용하고 변경 전 원래의 interrupt level을 반환한다.
+
+#### `intr_disable`
+```c
+enum intr_level
+intr_disable (void) 
+{
+  enum intr_level old_level = intr_get_level ();
+
+  /* Disable interrupts by clearing the interrupt flag.
+     See [IA32-v2b] "CLI" and [IA32-v3a] 5.8.1 "Masking Maskable
+     Hardware Interrupts". */
+  asm volatile ("cli" : : : "memory");
+
+  return old_level;
+}
+```
+> interrupt 를 disable하고 변경 전 원래의 interrupt level을 `intr_level`꼴로 반환하는 함수
+
+`cli` 어셈블리를 통해 interrupt flag를 지움으로써 interrupt를 비활성화하고 변경 전 원래의 interrupt level을 반환한다.
+
+#### `intr_init`
+```c
+void
+intr_init (void)
+{
+  uint64_t idtr_operand;
+  int i;
+
+  /* Initialize interrupt controller. */
+  pic_init ();
+
+  /* Initialize IDT. */
+  for (i = 0; i < INTR_CNT; i++)
+    idt[i] = make_intr_gate (intr_stubs[i], 0);
+
+  /* Load IDT register.
+     See [IA32-v2a] "LIDT" and [IA32-v3a] 5.10 "Interrupt
+     Descriptor Table (IDT)". */
+  idtr_operand = make_idtr_operand (sizeof idt - 1, idt);
+  asm volatile ("lidt %0" : : "m" (idtr_operand));
+
+  /* Initialize intr_names. */
+  for (i = 0; i < INTR_CNT; i++)
+    intr_names[i] = "unknown";
+  intr_names[0] = "#DE Divide Error";
+  intr_names[1] = "#DB Debug Exception";
+  intr_names[2] = "NMI Interrupt";
+  intr_names[3] = "#BP Breakpoint Exception";
+  intr_names[4] = "#OF Overflow Exception";
+  intr_names[5] = "#BR BOUND Range Exceeded Exception";
+  intr_names[6] = "#UD Invalid Opcode Exception";
+  intr_names[7] = "#NM Device Not Available Exception";
+  intr_names[8] = "#DF Double Fault Exception";
+  intr_names[9] = "Coprocessor Segment Overrun";
+  intr_names[10] = "#TS Invalid TSS Exception";
+  intr_names[11] = "#NP Segment Not Present";
+  intr_names[12] = "#SS Stack Fault Exception";
+  intr_names[13] = "#GP General Protection Exception";
+  intr_names[14] = "#PF Page-Fault Exception";
+  intr_names[16] = "#MF x87 FPU Floating-Point Error";
+  intr_names[17] = "#AC Alignment Check Exception";
+  intr_names[18] = "#MC Machine-Check Exception";
+  intr_names[19] = "#XF SIMD Floating-Point Exception";
+}
+```
+> Interrupt system을 초기화하는 함수
+
+`pic_init()`을 통해 interrupt controller를 초기화하고 `intr_stubs`를 순회하며 x86 interrupts에 대한 `make_intr_gate`를 통해 커널 레벨에서 `intr_stubs[i]`을  호출하는 interrupt gate를 만든다. 또한 `lidt`를 통해 IDT(Interrupt Descriptor Table) register를 로드한다. `intr_names`에 interrupt들의 이름을 집어 넣는다.
+
+#### `intr_handler`
+> 모든 interrupt, exception, fault 등을 핸들링하는 핸들러로 `intr-stubs.S`에 의해 호출되는 함수이다 
+
+```c
+void
+intr_handler (struct intr_frame *frame) 
+{
+  bool external;
+  intr_handler_func *handler;
+
+  external = frame->vec_no >= 0x20 && frame->vec_no < 0x30;
+  if (external) 
+    {
+      ASSERT (intr_get_level () == INTR_OFF);
+      ASSERT (!intr_context ());
+
+      in_external_intr = true;
+      yield_on_return = false;
+    }
+```
+`frame`은 `intr_frame`으로 interrupt 및 interrupt 발생 스레드에 대한 정보를 담고 있다.
+`frame->vect_no` 즉 발생한 interrupt vector가 0x20(타이머 인터럽트)이상이면 external interrupt로 취급하여 `yield_on_return` (interrupt에서 돌아올 때 yield 여부)을 false, `in_external_intr`을 true로 한다.
+
+```c
+  /* Invoke the interrupt's handler. */
+  handler = intr_handlers[frame->vec_no];
+  if (handler != NULL)
+    handler (frame);
+  else if (frame->vec_no == 0x27 || frame->vec_no == 0x2f)
+    {
+    }
+  else
+    unexpected_interrupt (frame);
+
+  /* Complete the processing of an external interrupt. */
+  if (external) 
+    {
+      ASSERT (intr_get_level () == INTR_OFF);
+      ASSERT (intr_context ());
+
+      in_external_intr = false;
+      pic_end_of_interrupt (frame->vec_no); 
+
+      if (yield_on_return) 
+        thread_yield (); 
+    }
+}
+```
+`intr_handlers[frame->vec_no]`를 통해 interrupt에 해당되는 등록된 interrupt  handler를 `frame`을 패싱해 호출한다. external interrupt 처리를 완료 후 리턴되면 `in_external_intr`을 false로 복구하고 `yield_on_return`값에 따라 thread를 yield한다.
+- `intr_register_int`,`register_handler`, `intr_register_ext`를 통해 `intr_handlers`에 interrupt vector에 해당되는 핸들러 함수가 들어가게 된다.
+### `intr-stubs`
+```c
+.func intr_entry
+intr_entry:
+	/* Save caller's registers. */
+	pushl %ds
+	pushl %es
+	pushl %fs
+	pushl %gs
+	pushal
+        
+	/* Set up kernel environment. */
+	cld			/* String instructions go upward. */
+	mov $SEL_KDSEG, %eax	/* Initialize segment registers. */
+	mov %eax, %ds
+	mov %eax, %es
+	leal 56(%esp), %ebp	/* Set up frame pointer. */
+
+	/* Call interrupt handler. */
+	pushl %esp
+.globl intr_handler
+	call intr_handler
+	addl $4, %esp
+.endfunc
+```
+`intrNN_stub`에 의해 internal 또는 external interrupt가 시작되며, `intr_frame`에 `frame_pointer`,`error_code`,`vec_no`를 모두 push한 뒤 `intr_entry`로 점프하게 된다. 
+`intr_entry`에서는 interrupt가 발생한 스레드의 register 값들을 stack 넣어 저장한다. 이후 `mov $SEL_KDSEG, %eax `를 통해 커널 환경으로 변경한 이후 frame pointer를 설정한다. 마지막으로 `esp`를 넣은 다음 `intr_handler`를 호출하고 stack point를 증가시킨다.
+
+```c
+.globl intr_exit
+.func intr_exit
+intr_exit:
+        /* Restore caller's registers. */
+	popal
+	popl %gs
+	popl %fs
+	popl %es
+	popl %ds
+
+        /* Discard `struct intr_frame' vec_no, error_code,
+           frame_pointer members. */
+	addl $12, %esp
+
+        /* Return to caller. */
+	iret
+.endfunc
+```
+`intr_exit`은 interrupt 처리를 마무리할 때 호출되는 함수로 `intr_exit`에서는 넣어 두었던 레지스터 값들을 pop해 복구하고 esp에 12를 더해 `intr_frame`의 `vec_no`,`error_code`,`frame_pointer members`를 무시한다. 그리고 return 된다.
+
+```c
+	.data
+.globl intr_stubs
+intr_stubs:
+
+/* This implements steps 1 and 2, described above, in the common
+   case where we just push a 0 error code. */
+#define zero                                    \
+	pushl %ebp;                             \
+	pushl $0
+
+/* This implements steps 1 and 2, described above, in the case
+   where the CPU already pushed an error code. */
+#define REAL                                    \
+        pushl (%esp);                           \
+        movl %ebp, 4(%esp)
+
+/* Emits a stub for interrupt vector NUMBER.
+   TYPE is `zero', for the case where we push a 0 error code,
+   or `REAL', if the CPU pushes an error code for us. */
+#define STUB(NUMBER, TYPE)                      \
+	.text;                                  \
+.func intr##NUMBER##_stub;			\
+intr##NUMBER##_stub:                            \
+	TYPE;                                   \
+	push $0x##NUMBER;                       \
+        jmp intr_entry;                         \
+.endfunc;					\
+                                                \
+	.data;                                  \
+	.long intr##NUMBER##_stub;
+```
+### User System call
+`lib/user/syscall.c`에는 유저가 프로그램에 사용할 수 있는 system call 발생 함수들이 존재한다. user는 다음 함수들을 직접 호출하여 0x30 interrupt 즉 system call을 발생시키고 `intr_frame`이 인수로 넘어간 `syscall_handler`가 호출된다. 
+#### `syscall0~3`
+```c
+#define syscall3(NUMBER, ARG0, ARG1, ARG2)                      \
+        ({                                                      \
+          int retval;                                           \
+          asm volatile                                          \
+            ("pushl %[arg2]; pushl %[arg1]; pushl %[arg0]; "    \
+             "pushl %[number]; int $0x30; addl $16, %%esp"      \
+               : "=a" (retval)                                  \
+               : [number] "i" (NUMBER),                         \
+                 [arg0] "r" (ARG0),                             \
+                 [arg1] "r" (ARG1),                             \
+                 [arg2] "r" (ARG2)                              \
+               : "memory");                                     \
+          retval;                                               \
+        })
+```
+> argument를 패싱하고 syscall `NUMBER`을 발생하고 리턴 값을 int로 리턴하는 함수
+
+현재 스레드의 스택에 뒤의 argument부터 순차적으로 집어넣고 마지막에는 syscall number인 `NUMBER`를 집어넣는다. 이후 syscall로부터 리턴된 값을 int로 리턴한다.
+- 스택에 집어넣은 값들은 `syscall_handler`에서 `intr_frame`의 `esp`(현재 값을 집어넣은 스택의 끝 주소)로부터 역순으로 꺼내 어떤 syscall인지 구분거나 argument를 얻을 수 있다. 하지만 현재 구현 상에는 단지 프로세스를 종료시킨다.
+- syscall handler로부터 return되는 값은 handler에서 리턴값을 eax에 넣어 eax 레지스터에 담겨 리턴되는 것이다.
+passing하는 argument의 개수는 함수 뒤의 숫자이다. 아래의 각 syscall을 발생하는 함수에서 syscall 별 필요한 argument의 개수에 따라 syscall0~3 중 적절한 함수를 호출한다.
+
+
+아래는 유저가 직접 호출하여 직접 원하는 system call을 발생시키는 함수들이다. 이에는 이번에 제공해야하는 syscall에 대한 함수도 있고 assn3에서 구현해야하는 syscall도 존재한다.
+```c
+void
+halt (void) 
+{
+  syscall0 (SYS_HALT);
+  NOT_REACHED ();
+}
+
+void
+exit (int status)
+{
+  syscall1 (SYS_EXIT, status);
+  NOT_REACHED ();
+}
+
+bool
+create (const char *file, unsigned initial_size)
+{
+  return syscall2 (SYS_CREATE, file, initial_size);
+}
+
+int
+read (int fd, void *buffer, unsigned size)
+{
+  return syscall3 (SYS_READ, fd, buffer, size);
+}
+```
+위는 많은 syscall에 대한 함수 중 일부이며 syscall에 따라 argument의 개수와 return value 유무, 타입 등이 다르다.
 ### System call
 유저 프로세스가 kernel functionality에 접근하고 싶으면 system call을 invoke(호출)하면 된다. 현재 pintos에 구현된 것은 skeleton system call handler로 system call을 invoke할 시 handler에 의해 `"system call!"` 메세지를 출력하고 user process terminate한다. 이번 assn에서 이를 requirement에 맞게 변경하여 구현하면 된다.
 
+**System Call은 다음 순서로 호출된다.**
+**`lib/user/syscall.c의 syscall 함수`-->`intrNN_stub`-->`intr_entry`-->`intr_handler`-->`syscall_handler`-->`각system call의 대응 함수`**
 #### `syscall_handler(struct intr_frame *)`
 ```c
 static void
@@ -1865,6 +2194,10 @@ main (void)
 
 `threads/init.c`의 `main()`에서 kernel을 초기화할 때 `tss_init()`을 호출해 Kernel TSS, 전역변수 `tss`를 초기화하여 User mode에서 interrupt가 발생하여 stack을 전환할 때 TSS를 사용할 수 있도록 한다. 
 `gdt_init()` 또한 호출하여 핵심적인 6가지 segment에 대한 descriptor를 포함하는 GDT(Global Descriptor Table)을 초기화한다. 
+```c
+  intr_init ();
+```
+`intr_init`을 호출하여 `interrupt` 시스템을 초기화한다. 이는 exception 발생에 따라 handler를 호출하게 한다.
 
 ```c
   exception_init ();

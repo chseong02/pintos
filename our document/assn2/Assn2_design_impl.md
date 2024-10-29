@@ -4,21 +4,25 @@
 후술할 시스템 콜 관련 구현에서 `exit`이 호출되거나 다른 시스템 콜 처리 중 예외 상황이 발생했을 때 스레드를 종료시킬 수 있는 함수를 만들어 정상 종료와 예외 상황을 일괄적으로 처리할 수 있게 구현한다. 프로세스 종료 메세지은 해당 함수의 실행 도중 출력하면 되는데, 프로세스 이름은 `thread_current()->name`으로 불러올 수 있고 exit code는 함수 인자로 전달될 예정이다.
 
 ### Argument Passing
-현재 user program을 실행하는 구현은 다음과 같다. command line에서 parsing해 얻은 `argv[1]`을 `file_name`으로 하여 `process_execute(file_name)`에서 `start_process(file_name_)`을 수행하는 스레드를 생성하고 `start_process`에서는 전해 받은`file_name_`을 load하고 해당 프로그램의 시작 위치로 가 프로그램을 실행한다. 이 때 `process_execute`에 실행해야 하는 파일 명과 argument를 포함한 `file_name`을 넘기지만 `process_execute` 또는 `start_process`에서 이를 파싱하여 파일 이름만을 가지고 ELF를 로드하는 것이 아닌 파일 명과 argument가 모두 포함된 `file_name` 을 가지고 처리하고 있으며 또한 argument를 load한 프로그램에게 passing해주는 로직도 포함되어 있지 않다.
+현재 user program을 실행하는 구현은 다음과 같다.
+- command line에서 parsing해 얻은 `argv[1]`을 `file_name`으로 하여 `process_execute(file_name)`에서 `start_process(file_name_)`을 수행하는 스레드를 생성한다.
+- `start_process`에서는 전해 받은 `file_name_`을 이름으로 하는 실행 파일을 load하고 해당 프로그램의 시작 위치로 가 프로그램을 실행한다.
+- `process_execute`에 실행해야 하는 파일 명과 argument를 포함한 `file_name`을 넘긴다.
+  - 다만 초기 구현에선 `process_execute`와 `start_process`에서 파일 명과 argument가 모두 포함된 파싱되지 않은 `file_name`을 가지고 처리하고 있고, 또한 load한 프로그램에게 argument를 passing해주는 로직도 포함되어 있지 않다.
 
 그렇기에 `process_execute` 또는 `start_process`에서 `file_name`을 parsing하여 파일 이름과 argument로 분리하는 로직을 추가해야 한다. 또한 파일이름을 가지고 executable을 로드 완료한 이후에 parsing해 얻은 argument 및 관련 정보를 executable을 로드한 스레드의 스택에 컨벤션에 맞추어 집어 넣어 user program이 해당 argument를 사용할 수 있도록 해야 한다. 
 
 자세한 구현 계획은 아래와 같다.
 - `process_execute(file_name)`에서 `strtok_r`을 이용하여 `file_name`을 `' '`을 기준으로 나누어 맨 앞을 `thread_create`의 스레드 이름으로 사용한다.
-	- argument와 파일 이름을 모두 포함한 스레드 이름을 가지는 것이 아닌 파일 이름(실행 프로그램 이름)을 스레드 이름으로 가지게 하기 위함. 
+	- argument와 파일 이름을 모두 포함한 스레드 이름을 가지는 것이 아닌 파일 이름(실행 프로그램 이름)을 스레드 이름으로 가지게 하기 위함이다.
 - `start_process`에서 매개변수로 받은 `file_name_`을 `strtok_r`을 이용하여 `' '`을 기준으로 나누어 맨 앞을 `load`함수 호출 시 파일이름으로 사용한다.
-- `start_process`에서 load한 직 후, parsing한 `file_name_`의 뒷 부분을 차례로 순회하며 `if_.esp` 로부터 시작해 문자열을 복사해 집어 넣는다.(Ex. `bar -> f00 -> -1 -> /bin/ls\0`순)
+- `start_process`에서 load한 직후, parsing한 `file_name_`의 뒷 부분을 차례로 순회하며 `if_.esp` 로부터 시작해 문자열을 복사해 집어 넣는다.(Ex. `bar -> f00 -> -1 -> /bin/ls\0`순)
 	- 각 argument의 끝은 `\0` 존재. 즉 생각하는 길이보다 1 더 길다.
-- 앞서 argument로 다양한 문자열을 집어넣었기에 스택에 패딩을 집어넣어 주소가 4배수가 될 수 있도록 한다.
+- 앞서 argument로 다양한 문자열을 집어넣었기에 스택에 패딩을 집어넣어 주소가 4-byte allign 될 수 있도록 한다.
 - 앞서 집어넣은 argument 문자열의 시작 주소를 집어 넣은 순서대로 차례로 stack에 넣는다. 
 - stack에 넣은 argument의 개수(`argc`)를 스택에 넣은 뒤 마지막 return address에 대응되는 NULL 값을 스택에 넣은 뒤 esp를 올바르게 설정한다. 
-- 위 구현은 다음 컨벤션에 따라 계획한 것이다.
-이는 `/bin/ls -l foo bar` 커맨드를 실행하였을 때 argument를 올바르게 패싱한 스레드 스택의 모습이다.
+
+아래의 표는 `/bin/ls -l foo bar` 커맨드를 실행하였을 때 argument를 올바르게 패싱한 스레드 스택의 모습이다.
 
 | Address    | Name           | Data       | Type          |
 | ---------- | -------------- | ---------- | ------------- |

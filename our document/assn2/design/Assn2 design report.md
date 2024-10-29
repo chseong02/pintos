@@ -1609,6 +1609,283 @@ do_format (void)
 ```
 앞서 설명한 `filesys_init`에서 `format` 플래그가 설정되어있을 시 실행되는 함수. 새로운 free map을 생성한 뒤 1번 블럭에 16개의 파일 정보를 담을 수 있는 루트 디렉토리를 생성한다. 
 
+### Init
+#### `paging_init(void)`
+```c
+static void
+paging_init (void)
+{
+  uint32_t *pd, *pt;
+  size_t page;
+  extern char _start, _end_kernel_text;
+
+  pd = init_page_dir = palloc_get_page (PAL_ASSERT | PAL_ZERO);
+  pt = NULL;
+  for (page = 0; page < init_ram_pages; page++)
+    {
+      uintptr_t paddr = page * PGSIZE;
+      char *vaddr = ptov (paddr);
+      size_t pde_idx = pd_no (vaddr);
+      size_t pte_idx = pt_no (vaddr);
+      bool in_kernel_text = &_start <= vaddr && vaddr < &_end_kernel_text;
+
+      if (pd[pde_idx] == 0)
+        {
+          pt = palloc_get_page (PAL_ASSERT | PAL_ZERO);
+          pd[pde_idx] = pde_create (pt);
+        }
+
+      pt[pte_idx] = pte_create_kernel (vaddr, !in_kernel_text);
+    }
+
+  /* Store the physical address of the page directory into CR3
+     aka PDBR (page directory base register).  This activates our
+     new page tables immediately.  See [IA32-v2a] "MOV--Move
+     to/from Control Registers" and [IA32-v3a] 3.7.5 "Base Address
+     of the Page Directory". */
+  asm volatile ("movl %0, %%cr3" : : "r" (vtop (init_page_dir)));
+}
+```
+
+>  페이지 디렉토리, 페이지 테이블을 가상 메모리와 매핑하고 Page Directory와 Page Table에 free한 페이지를 allocate해 초기화하는 함수
+
+`palloc_get_page`를 이용해 `pd`에 자유로운 페이지를 allocate한다. 해당 함수는 kernel의 init 중 일부로 매우 중요한 작업이기에 page 할당 중 실패하였을 때  패닉한다.
+page의 개수만큼 순회하며 각 페이지의 물리적 주소에 대응되는 virtual address를 구하고 이에 해당하는 페이지 디렉토리 엔트리 인덱스(`pde_idx`), 페이지 테이블 엔트리 인덱스(`pte_idx`) 을 구한다. 또한 페이지 테이블을 위한 페이지를 할당해주기도 한다.
+마지막으로 CR3로 알려진 pbdr 레지스터에 page diretory의 물리 주소를 저장한다. 
+
+#### `read_command_line(void)`
+```c
+static char **
+read_command_line (void) 
+{
+  static char *argv[LOADER_ARGS_LEN / 2 + 1];
+  char *p, *end;
+  int argc;
+  int i;
+
+  argc = *(uint32_t *) ptov (LOADER_ARG_CNT);
+  p = ptov (LOADER_ARGS);
+  end = p + LOADER_ARGS_LEN;
+```
+> command arguments를 단어 단위로 잘라 그 문자열의 주소들을 리스트를 반환하는 함수
+
+`argc`에 physical 주소 `LOADER_ARG_CNT`에 저장되어 있는 argument 개수를 저장하고 `p`에는 argument들이 저장되어 있는 physical 주소 `LOADER_ARGS`의 가상 주소를 저장한다.
+
+```c
+  for (i = 0; i < argc; i++) 
+    {
+      if (p >= end)
+        PANIC ("command line arguments overflow");
+
+      argv[i] = p;
+      p += strnlen (p, end - p) + 1;
+    }
+  argv[argc] = NULL;
+
+  /* Print kernel command line. */
+  printf ("Kernel command line:");
+  for (i = 0; i < argc; i++)
+    if (strchr (argv[i], ' ') == NULL)
+      printf (" %s", argv[i]);
+    else
+      printf (" '%s'", argv[i]);
+  printf ("\n");
+
+  return argv;
+}
+```
+
+`p`에서부터 시작해 `\0`를 기준으로 문자열을 나누어 생각해 `0`로 구분된 각 문자열의 시작 주소를 `argv`(list 처럼 작동)에 차례대로 저장한다. 조회 중인 주소가 최대 수치의 주소(`end`)를 넘어서면 패닉을 일으킨다.
+`argv[argc]`(끝 부분)에 `NULL`을 집어넣어 argument list의 끝을 표시한다.
+그리고 커널에 집어넣은 커맨드를 출력하고 args가 단어 단위로 저장된 `argv`를 반환한다. 
+
+
+#### `parse_options(char **argv)`
+```c
+static char **
+parse_options (char **argv) 
+{
+  for (; *argv != NULL && **argv == '-'; argv++)
+    {
+      char *save_ptr;
+      char *name = strtok_r (*argv, "=", &save_ptr);
+      char *value = strtok_r (NULL, "", &save_ptr);
+      
+      if (!strcmp (name, "-h"))
+        usage ();
+      else if (!strcmp (name, "-q"))
+        shutdown_configure (SHUTDOWN_POWER_OFF);
+      else if (!strcmp (name, "-r"))
+        shutdown_configure (SHUTDOWN_REBOOT);
+#ifdef FILESYS
+      else if (!strcmp (name, "-f"))
+        format_filesys = true;
+      else if (!strcmp (name, "-filesys"))
+        filesys_bdev_name = value;
+      else if (!strcmp (name, "-scratch"))
+        scratch_bdev_name = value;
+#ifdef VM
+      else if (!strcmp (name, "-swap"))
+        swap_bdev_name = value;
+#endif
+#endif
+      else if (!strcmp (name, "-rs"))
+        random_init (atoi (value));
+      else if (!strcmp (name, "-mlfqs"))
+        thread_mlfqs = true;
+#ifdef USERPROG
+      else if (!strcmp (name, "-ul"))
+        user_page_limit = atoi (value);
+#endif
+      else
+        PANIC ("unknown option `%s' (use -h for help)", name);
+    }
+
+  /* Initialize the random number generator based on the system
+     time.  This has no effect if an "-rs" option was specified.
+
+     When running under Bochs, this is not enough by itself to
+     get a good seed value, because the pintos script sets the
+     initial time to a predictable value, not to the local time,
+     for reproducibility.  To fix this, give the "-r" option to
+     the pintos script to request real-time execution. */
+  random_init (rtc_get_time ());
+  
+  return argv;
+}
+```
+
+> argument의 주소들이 담긴 주소를 받아 각 option에 맞는 행위를 수행한 뒤 option이 아닌 첫번째 argument를 반환하는 함수
+
+매개변수로 입력 받은 argument의 주소들이 담긴 list를 주소 값이 null이 아니거나 '-' 값으로 시작하는 동안 순회하며 확인한다. 순회한 주소의 문자열을 확인하여 '-h', '-q', '-r' 등에 일치하는지 확인하고 그에 맞는 작업을 수행하여 kernel의 설정을 변경한다. 이에는 파일시스템 초기화, user pool의 페이지 limit 등에 대한 옵션이 포함되어 있다. 그리고 '-'값으로 시작하지 않는 문자열의 주소가 담긴 주소(입력 매개변수 list element 주소 중 하나)를 반환한다. 해당 주소는 kernel이 실행할 명령어를 담고 있다.
+
+#### `run_task(char **argv)`
+```c
+static void
+run_task (char **argv)
+{
+  const char *task = argv[1];
+  
+  printf ("Executing '%s':\n", task);
+#ifdef USERPROG
+  process_wait (process_execute (task));
+#else
+  run_test (task);
+#endif
+  printf ("Execution of '%s' complete.\n", task);
+}
+```
+
+>매개변수로 받은 `argv`의 `argv[1]`가 가리키는 명령어를 `run_test` 또는 `process_wait`를 통해 수행하는 함수
+
+매개변수로 받은 `char **argv`의 `argv[1]`가 가리키는 명령어를 `process_wait`를 통해 수행한다. `process_execute`를 통해 `task`라는 이름의 파일을 로드하여 user program을 실행하는 스레드를 생성한다. `process_wait`을 통해 해당 스레드가 끝날 때까지 기다리게 구현해야하지만 현재 구현상 바로 -1을 반환하고 리턴한다. 즉 정상적으로 user program을 수행할 수 없다.
+#### `run_actions(char **argv)`
+```c
+static void
+run_actions (char **argv) 
+{
+  /* An action. */
+  struct action 
+    {
+      char *name;                       /* Action name. */
+      int argc;                         /* # of args, including action name. */
+      void (*function) (char **argv);   /* Function to execute action. */
+    };
+
+  /* Table of supported actions. */
+  static const struct action actions[] = 
+    {
+      {"run", 2, run_task},
+#ifdef FILESYS
+      {"ls", 1, fsutil_ls},
+      {"cat", 2, fsutil_cat},
+      {"rm", 2, fsutil_rm},
+      {"extract", 1, fsutil_extract},
+      {"append", 2, fsutil_append},
+#endif
+      {NULL, 0, NULL},
+    };
+```
+>매개변수로 입력 받은 argv를 순회하며 argv 내 명시된 action들을 순차적으로 수행하는 함수
+
+`action` 구조체는 수행 가능한 액션의 이름, 필요한  argument 개수, 해당 액션을 수행하기 위한 function을 저장한다.
+`actions`은 수행 가능한 action에 대응대는 `action` list로 현재로서는 `run`과 예외 처리를 위한 값인 `NULL`이 있다.
+
+```c
+  while (*argv != NULL)
+    {
+      const struct action *a;
+      int i;
+
+      /* Find action name. */
+      for (a = actions; ; a++)
+        if (a->name == NULL)
+          PANIC ("unknown action `%s' (use -h for help)", *argv);
+        else if (!strcmp (*argv, a->name))
+          break;
+
+      /* Check for required arguments. */
+      for (i = 1; i < a->argc; i++)
+        if (argv[i] == NULL)
+          PANIC ("action `%s' requires %d argument(s)", *argv, a->argc - 1);
+
+      /* Invoke action and advance. */
+      a->function (argv);
+      argv += a->argc;
+    }
+  
+}
+```
+매개변수로 입력받은 `argv`를 순회하며 주소가 가리키는 문자열과 `actions`의 아이템과 이름이 일치하는 것이 있는지 확인 후 있다면 해당 `action`에 명시된 argument 개수만큼 제공하였는지 확인한다. 개수가 동일하다면 함수에 해당 action에 해당되는 문자열 주소를 가리키는 argv 내 값의 주소를 해당 `action`에 해당되는 함수`action->function`의 매개변수로 두어 해당 함수를 호출해 action을 수행한다. `argv`를 순회하며 NULL 값을 만날 때까지 이를 반복한다.
+만약 `actions`에 없는 action을 요구하거나 `action`에 대한 args가 부족할 때는 패닉을 일으킨다.
+
+
+#### 초기설정 in `main in threads/init.c`
+많은 초기 설정이 있지만 이는 Assn1에서 깊이 다루었기에 이번 과제(User program)와 연관된 초기화에 대한 설명만 첨부하도록 하겠다.
+
+```c
+int
+main (void)
+{
+  char **argv;
+  ...
+  /* Initialize memory system. */
+  palloc_init (user_page_limit);
+  malloc_init ();
+  paging_init ();
+
+  /* Segmentation. */
+#ifdef USERPROG
+  tss_init ();
+  gdt_init ();
+#endif
+```
+`user_page_limit`은 pintos command에서 `-ul`과 함께 입력된 수치 또는 기본 값 `SIZE_MAX`로 user pool의 page 개수 한계이다. `palloc_init`을 호출할 때 넘겨주어 user pool에 최대로 가질 수 있는 page 개수를 정해준다. 
+`paging_init()`을 통해 cpu에 새 page directory를 세팅하고 Page Directory와 Page Table을 초기화하고 pbdr 레지스터도 초기화해준다.
+
+`threads/init.c`의 `main()`에서 kernel을 초기화할 때 `tss_init()`을 호출해 Kernel TSS, 전역변수 `tss`를 초기화하여 User mode에서 interrupt가 발생하여 stack을 전환할 때 TSS를 사용할 수 있도록 한다. 
+`gdt_init()` 또한 호출하여 핵심적인 6가지 segment에 대한 descriptor를 포함하는 GDT(Global Descriptor Table)을 초기화한다. 
+
+```c
+  exception_init ();
+  syscall_init ();
+```
+이후에는 `exception_init()`을 호출해 page fault를 포함해 각종 exception에 대한 핸들러 함수를 등록하여 exception에 대한 처리를 할 수 있도록 한다. 또한 `syscall_init()`을 호출하여 system call interrupt에 대한 핸들러 함수를 등록해 system call에 대한 처리를 할 수 있도록 한다. 
+
+```c
+#ifdef FILESYS
+  /* Initialize file system. */
+  ide_init ();
+  locate_block_devices ();
+  filesys_init (format_filesys);
+```
+`format_filesys`는 pintos command 에 `-f` 포함될 시 true가 되는 값으로 file system을 format 여부를 담는다. `filesys_init`에 함께 넘겨줘 호출하여 file system을 초기화한다. 
+
+```c
+  run_actions (argv);
+```
+이렇게 초기화가 완료되면 `run_actions`를 통해 `run_task`를 호출해 `process_execute`를 통해 userprogram을 로드하고 수행하는 스레드를 생성하고 이를 `process_wait`으로 기다리길 기대하지만 현재 구현상 `process_wait`을 바로 리턴하여 userprogram을 정상적으로 수행되지 않는다.
+
 ## Design
 
 ### Process Termination Messages

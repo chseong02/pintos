@@ -1,6 +1,6 @@
-# Implementation
+## Implementation
 
-## Process Termination Messages
+### Process Termination Messages
 후술할 시스템 콜 관련 구현에서 `exit`이 호출되거나 다른 시스템 콜 처리 중 예외 상황이 발생했을 때 스레드를 종료시킬 수 있는 함수를 만들어 정상 종료와 예외 상황을 일괄적으로 처리할 수 있게 구현한다. 프로세스 종료 메세지은 해당 함수의 실행 도중 출력하면 되는데, 프로세스 이름은 `thread_current()->name`으로 불러올 수 있고 exit code는 함수 인자로 전달될 예정이다.
 
 ### Argument Passing
@@ -75,6 +75,7 @@ userprog를 실행하는 스레드들은 자신을 포함하는 process를 가�
 - `create_pid`를 통한 pid 설정, `fdt`, `children_list`, 등의 초기화를 진행한다.
 - `load_sema`의 값은 0으로 하여 초기화한다.
 	- `start_process`에서 `load` 직후 `load_sema`를 up해준다. 이는 load 완료를 나타내기 위함이다.
+	
 #### User Process Manipulation
 `void halt(void)`
 - pintos를 종료하는 함수이다.
@@ -213,7 +214,7 @@ void close (int fd)
 > 시스템 콜 도중 예외 상황 시 동작은 우선 Pintos 문서에 명시되어있는 동작을 따르되, 별다른 명시가 없을 경우 프로세스를 종료하는 방식을 따른다.
 
 
-## Denying Writes to Executables
+### Denying Writes to Executables
 디스크 상에 존재하는 유저 프로그램 역시 하나의 파일이기 때문에 동시에 여러 프로세스가 접근하여 Read, Write, Execute하는 것이 가능하다. 하지만 어떤 프로세스가 유저 프로그램을 실행하는 중 다른 프로세스가 해당 프로그램 파일에 Write 하는 등의 수정이 일어날 경우 정상적인 동작이 불가능할 것이다. 때문에 어떤 프로세스가 파일을 실행하고 있을 경우 앞서 살펴본 `file_deny_write`를 호출하여 다른 프로세스가 파일을 변경하는 것을 막고, 실행을 마칠 시 `file_allow_write`를 호출하여 제한을 해제해주는 과정이 수반되어야 한다.
 
 프로세스가 실행 가능한 ELF 파일을 읽어와 스택에 올리는 과정은 `userprog/process.c`의 `load` 함수에서 일어난다. 이때 대상 파일은 `filesys_open(file_name)`으로 명시가 되어있으므로, 파일을 성공적으로 불러온 후 해당 파일에 대해 `file_deny_write`를 호출함으로써 변경 제한을 설정하는 기능은 쉽게 구현이 가능하다.

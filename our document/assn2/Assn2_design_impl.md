@@ -42,11 +42,67 @@
 - 위 구현에 문자열을 보관, 유지하기 위해 page를 allocation해야 할 필요가 있을 수 있다.
 
 
-## System call
-TODO: Syscall Handler
-### User Process Manipulation
-TODO: `halt`, `exit`, `exec`, `wait`
-### File Manipulation
+### System Call
+현재 구현에서 system call 즉 0x30 interrupt에 대한 handler function은 `syscall_handler`로 어떤 system call인지 구분하지 않고 메세지를 출력하고 `thread_exit`을 통해  스레드를 종료한다. 
+
+이를 system call 에 따라 각기 다른 기능을 수행하도록 변경해 구현해야 한다. 
+
+#### System Call Handler
+- `syscall_handler`에서 인수로 받은 `intr_frame *f`의 `esp`를 조회하여 32비트 system call number를 얻는다.
+	- 해당 esp가 올바른 주소인지 검증하기 위해 
+	- 또한 system call에 대한 argument는 system call number 다음 주소에 32비트 간격으로 존재한다.
+- 위에서 얻은 system call number를 바탕으로 여러 system call 함수 중 어떤 함수를 실행할지 결정하고 호출해 실행한다.
+	- 이 때 함수 호출시 현재 esp 다음 주소를 매개변수로 넘겨준다. 이는 각 system call 함수에서 사용해야 할 argument를 포함할 것이다.
+	- 주소로부터 정해진 갯수(각 함수의 argument 개수)의 32비트를 얻을 수 있는 util 함수를 추가한다.
+- 함수 호출의 결과를 `intr_frame`의 `eax`에 대입하여 system call의 결과 값을 리턴할 수 있도록 한다.
+
+#### Process Control Block(PCB)
+process에 대한 정보를 담은 Process Control Block struct인 `struct pcb`를 `userprog/process.h`에 선언한다.
+`struct pcb`
+- process identifier인 `pid`
+- exitcode `exit_code`
+- `wait`, `exit`에서 사용하는 exit code에 대한 semaphore `exit_code_sema`
+- 해당 프로세스가 가진 file descriptor의 table인 `fdt`
+- 자식 프로세스 list인 `children_list`
+- 위 list의 자식 프로세스 list elem인 `child_list_elem`
+-  exec 완료를 관리하는 semaphore `load_sema`
+
+userprog를 실행하는 스레드들은 자신을 포함하는 process를 가지게 되고 이를 표현하기 위해 `thread` 구조체에 멤버 변수에 `pcb`에 대한 포인터를 추가해준다.
+
+`create_tid`와 유사하게 unique한 pid를 생성하는 `create_pid`함수를 추가해주어야 한다.
+`pcb` 구조체 정보를 초기화하는 `pcb_init` 함수를 추가한다.
+- `wait`에 의해 스레드보다 `pcb`가 더 오랫동안 살아있을 수 있기에 `palloc_get_page` 등을 이용해 `pcb`를 위한 공간을 별도로 할당 받아야 한다.
+- `create_pid`를 통한 pid 설정, `fdt`, `children_list`, 등의 초기화를 진행한다.
+- `load_sema`의 값은 0으로 하여 초기화한다.
+	- `start_process`에서 `load` 직후 `load_sema`를 up해준다. 이는 load 완료를 나타내기 위함이다.
+#### User Process Manipulation
+`void halt(void)`
+- pintos를 종료하는 함수이다.
+- `shutdown_power_off()`를 호출하여 종료한다.
+
+`pid_t exec(const char *cmd_line)`
+
+주어진 cmd를 수행하는 자식 프로세스를 생성하는 시스템 콜 함수이다.
+`load_sema`를 이용해 자식 프로세스의 `load` 완료시점까지 parent process가 syscall을 리턴하지 않게 한다.
+- `pcb_init`을 호출하여 새로운 `pcb`를 만들어 초기화한 뒤 `children_list`에 해당 pcb를 추가한다.
+- `cmd_line`를 인수로 하여 `process_execute`를 호출한다.
+- `pcb`의 `load_sema`를 `down`한다.
+	- child process가 로드 완료되면 `up`되며 통과할 수 있게 된다.
+- `pcb`의 `pid`를 반환한다.
+
+`void exit(int status)`
+- `pcb`의 `exit_code`에 `status`를 넣는다. `exit_code_sema`를 `up`한다.
+- `process_exit`을 이용해 process 자원을 모두 반납한다.
+
+`int wait(pid_t pid)`
+
+`pid` 프로세스가 exit할 때 까지 기다리는 시스템 콜 함수이다.
+`exit_code_sema`를 통해 자식 프로세스가 exit할 때까지 wait를 리턴하지 않고 기다리다 exit 하면 해당 프로세스(이미 해제됨)의 `pcb`를 할당 해제하고 `exit_code`를 리턴한다.
+- 자식 프로세스 중, 즉 `children_list`를 순회하며 `pcb.pid`가 `pid`인 `pcb`를 찾는다.
+- 찾은`pcb`의 `exit_code_sema`를 `down`한다.
+	- 해당 프로세스가 exit()하면 `up`되어 진행할 수 있다.
+- `pcb.exit_code`를 `exit_code` 임시 변수에 저장한다.
+- `pcb`의 페이지를 해제하고 `exit_code`를 반환한다.
 
 #### File Descriptor (FD)
 UNIX 기반 운영체제에서 각 프로세스는 현재 open한 파일들에 접근하기 위해 각 파일마다 특정한 정수 키(key)를 대응시키는데, 이를 File Descriptor(FD)라고 한다. 일반적으로 시스템상 사전 정의된 일부 FD들을 제외하면 나머지 FD들은 프로세스마다 독립적으로 관리되기 때문에, PCB 위의 고정된 길이의 배열 (File Descriptor Table) 형태로 선언되어 관리한다. File Descriptor Table의 각 엔트리는 다음과 같이 구상해볼 수 있다.

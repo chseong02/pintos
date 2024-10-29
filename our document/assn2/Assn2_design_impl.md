@@ -1,7 +1,7 @@
 # Implementation
 
 ## Process Termination Messages
-TODO
+후술할 시스템 콜 관련 구현에서 `exit`이 호출되거나 다른 시스템 콜 처리 중 예외 상황이 발생했을 때 스레드를 종료시킬 수 있는 함수를 만들어 정상 종료와 예외 상황을 일괄적으로 처리할 수 있게 구현한다. 프로세스 종료 메세지은 해당 함수의 실행 도중 출력하면 되는데, 프로세스 이름은 `thread_current()->name`으로 불러올 수 있고 exit code는 함수 인자로 전달될 예정이다.
 
 ### Argument Passing
 현재 user program을 실행하는 구현은 다음과 같다. command line에서 parsing해 얻은 `argv[1]`을 `file_name`으로 하여 `process_execute(file_name)`에서 `start_process(file_name_)`을 수행하는 스레드를 생성하고 `start_process`에서는 전해 받은`file_name_`을 load하고 해당 프로그램의 시작 위치로 가 프로그램을 실행한다. 이 때 `process_execute`에 실행해야 하는 파일 명과 argument를 포함한 `file_name`을 넘기지만 `process_execute` 또는 `start_process`에서 이를 파싱하여 파일 이름만을 가지고 ELF를 로드하는 것이 아닌 파일 명과 argument가 모두 포함된 `file_name` 을 가지고 처리하고 있으며 또한 argument를 load한 프로그램에게 passing해주는 로직도 포함되어 있지 않다.
@@ -95,6 +95,7 @@ int filesize (int fd)
 ```
 주어진 FD에 해당하는 파일의 크기를 바이트 단위로 반환하는 시스템 콜.
 - FD Table에서 파일 포인터를 참조한 후 `file_length` 함수의 반환값을 반환한다.
+- 실패 시 에러 코드와 함께 프로세스를 종료한다.
 
 
 #### read
@@ -103,6 +104,7 @@ int read (int fd, void *buffer, unsigned size)
 ```
 주어진 FD에 해당하는 파일에서 최대 `size` 바이트 만큼의 데이터를 읽어 `buffer`에 복사하는 시스템 콜. 실제로 파일에서 복사된 바이트 수를 반환한다. 
 - FD Table에서 파일 포인터를 참조한 후 `file_read`를 호출한다.
+- 실패 시 `-1`을 반환한다.
 - `fd == 0`일 경우 사용자 입력에서 정보를 읽어온다는 뜻이므로 `input_getc`를 통해 키보드 입력을 받는다.
 - 악의적인 호출에 대비하여 `buffer`의 주소가 안전한지 검사한다.
 
@@ -114,6 +116,7 @@ int write (int fd, const void *buffer, unsigned size)
 `buffer` 위에 존재하는 데이터를 주어진 FD에 해당하는 파일에 최대 `size` 바이트 만큼 복사하는 시스템 콜. 실제로 파일에 복사된 바이트 수를 반환한다.
 - 현재 프로젝트에선 각 파일의 크기가 고정되어있기 때문에, 복사할 데이터의 크기가 파일의 끝을 넘어설 경우 파일의 끝까지만 복사한 뒤 복사된 바이트 수를 반환한다.
 - FD Table에서 파일 포인터를 참조한 후 `file_write`를 호출한다.
+- 실패 시 에러 코드와 함께 프로세스를 종료한다.
 - `fd == 1`의 경우 `putbuf` 함수를 이용해 콘솔에다 `buffer`의 데이터를 출력한다.
 - 악의적인 호출에 대비하여 `buffer`의 주소가 안전한지 검사한다.
 
@@ -125,6 +128,7 @@ void seek (int fd, unsigned position)
 주어진 FD에 해당하는 파일이 현재까지 읽은 데이터의 오프셋을 `position`으로 변경하는 시스템 콜.
 - FD Table에서 파일 포인터를 참조한 후 `file_seek`를 호출한다.
 - 새 `position`이 기존 파일 길이를 넘어서는 경우에도 정상 동작으로 간주한다.
+- 실패 시 에러 코드와 함께 프로세스를 종료한다.
 
 
 #### tell
@@ -133,6 +137,7 @@ unsigned tell (int fd)
 ```
 주어진 FD에 해당하는 파일이 현재까지 읽은 데이터의 오프셋을 반환하는 시스템 콜.
 - FD Table에서 파일 포인터를 참조한 후 `file_tell`을 호출한다.
+- 실패 시 에러 코드와 함께 프로세스를 종료한다.
 
 
 #### close
@@ -141,8 +146,11 @@ void close (int fd)
 ```
 주어진 FD에 해당하는 파일을 찾아 닫아주는 시스템 콜.
 - FD Table에서 파일 포인터를 참조한 후 `file_close`를 호출한 뒤, 해당 테이블 엔트리의 `in_use` 플래그를 `false`로 바꾼다.
+- 실패 시 에러 코드와 함께 프로세스를 종료한다.
 
 > 위의 File Manipulation 시스템 콜들은 동시에 여러 프로세스가 동시에 실행할 시 Race Condition이 발생할 우려가 있으므로 Lock 등의 Synchronization 수단을 통해 동시성을 확보해줘야 한다.
+>
+> 시스템 콜 도중 예외 상황 시 동작은 우선 Pintos 문서에 명시되어있는 동작을 따르되, 별다른 명시가 없을 경우 프로세스를 종료하는 방식을 따른다.
 
 
 ## Denying Writes to Executables

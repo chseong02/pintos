@@ -28,22 +28,31 @@ static bool load (const char *cmdline, void (**eip) (void), void **esp);
 tid_t
 process_execute (const char *file_name) 
 {
-  char *fn_copy;
+  char *full_cmd_line_copy;
+  char *file_name_copy;
+  char *save_ptr;
   tid_t tid;
 
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
-  fn_copy = palloc_get_page (0);
-  if (fn_copy == NULL)
+  full_cmd_line_copy = palloc_get_page (0);
+  if (full_cmd_line_copy == NULL)
     return TID_ERROR;
-  strlcpy (fn_copy, file_name, PGSIZE);
+  file_name_copy = palloc_get_page (0);
+  if (file_name_copy == NULL)
+    return TID_ERROR;
 
-  char *save_ptr;
-  char *real_file_name = strtok_r (fn_copy, " ", &save_ptr);
+  strlcpy (full_cmd_line_copy, file_name, PGSIZE);
+  strlcpy (file_name_copy, file_name, PGSIZE);
+
+  strtok_r (file_name_copy, " ", &save_ptr);
+  
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (real_file_name, PRI_DEFAULT, start_process, fn_copy);
+  tid = thread_create (file_name_copy, PRI_DEFAULT, start_process, full_cmd_line_copy);
+  palloc_free_page (file_name_copy);
   if (tid == TID_ERROR)
-    palloc_free_page (fn_copy); 
+    palloc_free_page (full_cmd_line_copy);
+  
   return tid;
 }
 

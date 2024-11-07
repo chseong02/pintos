@@ -13,8 +13,19 @@ syscall_init (void)
 }
 
 static void
-syscall_handler (struct intr_frame *f UNUSED) 
+syscall_handler (struct intr_frame *f) 
 {
   printf ("system call!\n");
-  thread_exit ();
+
+  //TODO: pointer 검증 필요할지도?
+  switch(*(uint32_t *)(f->esp)) {
+    case SYS_EXIT:
+    case SYS_HALT:
+      thread_exit();
+    default:
+      ;
+  }
+  
+  //TODO: 구현 완료시 exit 삭제
+  //thread_exit ();
 }

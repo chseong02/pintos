@@ -21,7 +21,7 @@
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 static void parse_args(char *cmd_line_str, char **argv, size_t *argv_len, uint32_t *argc);
-static void setup_args_stack(char *cmd_line_str, char **argv, size_t *argv_len, 
+static void setup_args_stack(char **argv, size_t *argv_len, 
   uint32_t argc, void** esp);
 
 /* Starts a new thread running a user program loaded from
@@ -88,7 +88,7 @@ start_process (void *file_name_)
   
   parse_args(file_name, argv, argv_len, &argc);
   success = load (file_name, &if_.eip, &if_.esp) && success;
-  setup_args_stack(file_name, argv, argv_len, argc, &if_.esp);
+  setup_args_stack(argv, argv_len, argc, &if_.esp);
   
   /* If load failed, quit. */
   palloc_free_page (file_name);
@@ -97,7 +97,6 @@ start_process (void *file_name_)
 
   if (!success) 
     thread_exit ();
-  //printf("여긴?");
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
      threads/intr-stubs.S).  Because intr_exit takes all of its
@@ -122,40 +121,9 @@ parse_args(char *cmd_line_str, char **argv, size_t *argv_len, uint32_t *argc)
 }
 
 static void
-setup_args_stack(char *cmd_line_str, char **argv, size_t *argv_len, uint32_t argc, 
+setup_args_stack(char **argv, size_t *argv_len, uint32_t argc, 
   void** esp)
 {
-  // char **argv;
-  // size_t *argv_len;
-  // uint32_t argc = 0;
-
-  // bool success = true;
-  
-  // argv = palloc_get_page(0);
-  // if(argv == NULL)
-  //   success = false;
-
-  // argv_len = palloc_get_page(0);
-  // if(argv_len == NULL)
-  //   success = false;
-
-  // if(success == false)
-  // {
-  //   palloc_free_page(argv);
-  //   palloc_free_page(argv_len);
-
-  //   return false;
-  // }
-
-  // char *arg, *save_ptr;
-  // for(arg = strtok_r(cmd_line_str," ",&save_ptr); arg != NULL; 
-  //   arg = strtok_r(NULL," ", &save_ptr))
-  // {
-  //   argv_len[argc] = strlen(arg) + 1;
-  //   argv[argc] = arg;
-  //   argc++;
-  // }
-  
   char* ptr_argv = (char*) *esp;
   for(int i = argc-1; i >= 0; i--)
   {

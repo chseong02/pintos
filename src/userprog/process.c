@@ -100,7 +100,7 @@ start_process (void *file_name_)
 
   success = load (file_name, &if_.eip, &if_.esp);
   char* ptr = (char*) if_.esp;
-  for(int i=0; i < argc; i++)
+  for(int i=argc-1; i >= 0; i--)
   {
     ptr = ptr - (char*)(argv_len[i]);
     //printf("%s",argv[i]);
@@ -115,9 +115,9 @@ start_process (void *file_name_)
   ptr -= 4;
   char* argv_addr_ptr= (char*)if_.esp; 
   char** ptr_= (char **)ptr;
-  for(uint32_t i=0; i < argc; i++)
+  for(int i=argc-1; i >= 0; i--)
   {
-    argv_addr_ptr -= argc;
+    argv_addr_ptr -= argv_len[i];
     *ptr_ = (char *) argv_addr_ptr;
     ptr_--;
   }
@@ -180,7 +180,7 @@ process_wait (tid_t child_tid)
     thread_foreach(check_thread_exist,&tid);
     intr_set_level (old_level);
     if(tid!=-1){
-      // printf("난 끝!\n");
+      //printf("난 끝!\n");
       return 1;
     }
   }

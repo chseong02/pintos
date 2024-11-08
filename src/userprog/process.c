@@ -89,10 +89,10 @@ start_process (void *file_name_)
   for(arg = strtok_r(file_name_," ",&save_ptr); arg != NULL; 
     arg = strtok_r(NULL," ", &save_ptr))
   {
-    printf("그래서 잘된다고\n");
+    //printf("그래서 잘된다고\n");
     argv_len[argc] = strlen(arg) + 1;
     argv[argc] = arg;
-    printf("%s",argv[argc]);
+    //printf("%s",argv[argc]);
     argc++;
     //argv++;
     //argv_len++;
@@ -103,8 +103,8 @@ start_process (void *file_name_)
   for(int i=0; i < argc; i++)
   {
     ptr = ptr - (char*)(argv_len[i]);
-    printf("%s",argv[i]);
-    printf("%d\n",argv_len[i]);
+    //printf("%s",argv[i]);
+    //printf("%d\n",argv_len[i]);
     strlcpy (ptr, (const char*)argv[i],(size_t) (argv_len[i]));
   }
 
@@ -128,9 +128,9 @@ start_process (void *file_name_)
   *ptr_ = 0;
   void* ori_if_esp = if_.esp;
   if_.esp = (void*) ptr_;
-  printf("%s",file_name);
-  printf("내 디버깅");
-  hex_dump(0,if_.esp,100,true);
+  //printf("%s",file_name);
+  //printf("내 디버깅");
+  //hex_dump(0,if_.esp,100,true);
   /*------------------------------------------*/
   
 
@@ -138,7 +138,7 @@ start_process (void *file_name_)
   palloc_free_page (file_name);
   if (!success) 
     thread_exit ();
-  printf("여긴?");
+  //printf("여긴?");
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
      threads/intr-stubs.S).  Because intr_exit takes all of its

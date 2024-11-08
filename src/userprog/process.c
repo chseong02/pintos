@@ -72,6 +72,8 @@ start_process (void *file_name_)
   if_.eflags = FLAG_IF | FLAG_MBS;
   
   /*------------------------------------------*/
+  success = load (file_name, &if_.eip, &if_.esp);
+  
   char **argv;
   size_t *argv_len;
   uint32_t argc = 0;
@@ -94,7 +96,7 @@ start_process (void *file_name_)
     argc++;
   }
 
-  success = load (file_name, &if_.eip, &if_.esp);
+  
   char* ptr = (char*) if_.esp;
   for(int i=argc-1; i >= 0; i--)
   {
@@ -138,6 +140,73 @@ start_process (void *file_name_)
      and jump to it. */
   asm volatile ("movl %0, %%esp; jmp intr_exit" : : "g" (&if_) : "memory");
   NOT_REACHED ();
+}
+
+static bool
+setup_args_stack(char *cmd_line_str, void** esp)
+{
+  char **argv;
+  size_t *argv_len;
+  uint32_t argc = 0;
+
+  bool success = true;
+  
+  argv = palloc_get_page(0);
+  if(argv == NULL)
+    success = false;
+
+  argv_len = palloc_get_page(0);
+  if(argv_len == NULL)
+    success = false;
+
+  if(success == false)
+  {
+    palloc_free_page(argv);
+    palloc_free_page(argv_len);
+  }
+
+  char *arg, *save_ptr;
+  for(arg = strtok_r(cmd_line_str," ",&save_ptr); arg != NULL; 
+    arg = strtok_r(NULL," ", &save_ptr))
+  {
+    argv_len[argc] = strlen(arg) + 1;
+    argv[argc] = arg;
+    argc++;
+  }
+  
+  char* ptr_argv = (char*) *esp;
+  for(int i = argc-1; i >= 0; i--)
+  {
+    ptr_argv = ptr_argv - (char*)(argv_len[i]);
+    strlcpy (ptr_argv, (const char*) argv[i], (size_t)(argv_len[i]));
+  }
+
+  ptr_argv = (char *)(((uint32_t) ptr_argv) - (4-(((uint32_t) ptr_argv) % 4)) % 4);
+  ptr_argv -= 4;
+
+  char** ptr_argv_addr = (char **) ptr_argv;
+  
+  *((uint32_t *)ptr_argv_addr) = 0;
+  ptr_argv_addr--;
+
+  char* argv_addr_iter_ptr = (char*) *esp; 
+  for(int i = argc-1; i >= 0; i--)
+  {
+    argv_addr_iter_ptr -= argv_len[i];
+    *ptr_argv_addr = (char *) argv_addr_iter_ptr;
+    ptr_argv_addr--;
+  }
+
+  *ptr_argv_addr = (char**)(ptr_argv_addr + 1);
+  ptr_argv_addr--;
+
+  *(uint32_t*)ptr_argv_addr = argc;
+  ptr_argv_addr--;
+  
+  *ptr_argv_addr = 0;
+  
+  void* ori_if_esp = *esp;
+  *esp = (void*) ptr_argv_addr;
 }
 
 // TODO: 임시 구현임. 추후 삭제 필요.

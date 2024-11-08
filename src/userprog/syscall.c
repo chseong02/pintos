@@ -18,11 +18,15 @@ syscall_handler (struct intr_frame *f)
   //printf ("system call!\n");
 
   //TODO: pointer 검증 필요할지도?
+  printf("시스템콜 디버깅!\n");
   switch(*(uint32_t *)(f->esp)) {
     case SYS_EXIT:
+    printf("나갑니다!\n");
     case SYS_HALT:
+      
       thread_exit();
     default:
+    printf("기본처리\n");
       ;
   }
   

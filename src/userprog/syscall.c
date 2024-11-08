@@ -48,25 +48,28 @@ syscall_init (void)
 }
 
 void
-get_args(int *sp, int *dst, int num)
+  get_args(int *sp, int *dst, int num)
 {
   for(int i = 0; i < num; i++)
   {
-    int *src = sp + num + 1;
-    if(check_ptr_in_user_space(src)) dst[i] = get_user(src);
+    int *src = sp + i + 1;
+    if(check_ptr_in_user_space(src)) dst[i] = *src;
+    
     else sys_exit(-1);
+    //hex_dump()
+    printf("%x",dst[i]);
   }
 }
 
 static void
 syscall_handler (struct intr_frame *f) 
 {
-  printf ("system call!\n");
+  //printf ("system call!\n");
   
   int arg[4];
 
   //TODO: pointer 검증 필요할지도?
-  printf("시스템콜 디버깅!\n");
+  //printf("시스템콜 디버깅!\n");
   switch(*(uint32_t *)(f->esp)) {
     case SYS_HALT:
       sys_halt();
@@ -76,10 +79,12 @@ syscall_handler (struct intr_frame *f)
       sys_exit(arg[0]);
       break;
     case SYS_WRITE:
+      //printf("프린트\n");
       get_args(f->esp, arg, 3);
+      hex_dump(0,f->esp,100,true);
       sys_write(arg[0], (const void *)arg[1], (unsigned)arg[2]);
     default:
-    printf("기본처리\n");
+    //printf("기본처리\n");
       ;
   }
   
@@ -109,10 +114,16 @@ sys_write(int fd, const void *buffer, unsigned size)
   if(!check_ptr_in_user_space(buffer))
     sys_exit(-1);
   if(fd == 0)
+  {
+    //printf("예외\n");
     sys_exit(-1);
+  }
+    
   else if(fd == 1)
   {
-    putbuf(buffer, size);
+    printf("출력 가능\n");
+    //printf("%s",(char *)buffer);
+    putbuf(buffer, 5);
     return size;
   }
   else

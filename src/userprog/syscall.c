@@ -91,6 +91,9 @@ syscall_handler (struct intr_frame *f)
   //printf ("system call!\n");
   
   int arg[4];
+  // hex_dump(0,f->esp,100,true);
+  if(!check_ptr_in_user_space(f->esp))
+    sys_exit(-1);
 
   //printf("시스템콜 디버깅!\n");
   switch(*(uint32_t *)(f->esp)) {

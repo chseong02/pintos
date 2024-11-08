@@ -70,13 +70,75 @@ start_process (void *file_name_)
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
+  
+  /*------------------------------------------*/
+  char **argv;
+  size_t *argv_len;
+  uint32_t argc = 0;
+
+  argv = palloc_get_page(0);
+  if(argv == NULL)
+    thread_exit();
+
+  argv_len = palloc_get_page(0);
+  if(argv_len == NULL)
+    thread_exit();
+
+  char *arg, *save_ptr;
+  
+  for(arg = strtok_r(file_name_," ",&save_ptr); arg != NULL; 
+    arg = strtok_r(NULL," ", &save_ptr))
+  {
+    printf("그래서 잘된다고\n");
+    argv_len[argc] = strlen(arg) + 1;
+    argv[argc] = arg;
+    printf("%s",argv[argc]);
+    argc++;
+    //argv++;
+    //argv_len++;
+  }
+
   success = load (file_name, &if_.eip, &if_.esp);
+  char* ptr = (char*) if_.esp;
+  for(int i=0; i < argc; i++)
+  {
+    ptr = ptr - (char*)(argv_len[i]);
+    printf("%s",argv[i]);
+    printf("%d\n",argv_len[i]);
+    strlcpy (ptr, (const char*)argv[i],(size_t) (argv_len[i]));
+  }
+
+  ptr = (char *)(((uint32_t) ptr) - (4-(((uint32_t) ptr) % 4)) % 4);
+
+  ptr -= 4;
+  *((uint32_t *)ptr) = 0;
+  ptr -= 4;
+  char* argv_addr_ptr= (char*)if_.esp; 
+  char** ptr_= (char **)ptr;
+  for(uint32_t i=0; i < argc; i++)
+  {
+    argv_addr_ptr -= argc;
+    *ptr_ = (char *) argv_addr_ptr;
+    ptr_--;
+  }
+  *ptr_= (char**)(ptr_+ 1);
+  ptr_--;
+  *(uint32_t*)ptr_ = argc;
+  ptr_--;
+  *ptr_ = 0;
+  void* ori_if_esp = if_.esp;
+  if_.esp = (void*) ptr_;
+  printf("%s",file_name);
+  printf("내 디버깅");
+  hex_dump(0,if_.esp,100,true);
+  /*------------------------------------------*/
+  
 
   /* If load failed, quit. */
   palloc_free_page (file_name);
   if (!success) 
     thread_exit ();
-
+  printf("여긴?");
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
      threads/intr-stubs.S).  Because intr_exit takes all of its
@@ -118,6 +180,7 @@ process_wait (tid_t child_tid)
     thread_foreach(check_thread_exist,&tid);
     intr_set_level (old_level);
     if(tid!=-1){
+      printf("난 끝!\n");
       return 1;
     }
   }
@@ -471,7 +534,7 @@ setup_stack (void **esp)
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
       if (success)
         //TODO: 핀토스 문서 추천의 임시 구현
-        *esp = PHYS_BASE - 12;
+        *esp = PHYS_BASE;
       else
         palloc_free_page (kpage);
     }

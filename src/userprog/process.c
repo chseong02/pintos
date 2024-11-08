@@ -20,7 +20,9 @@
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
-static bool setup_args_stack(char *cmd_line_str, void** esp);
+static void parse_args(char *cmd_line_str, char **argv, size_t *argv_len, uint32_t *argc);
+static void setup_args_stack(char *cmd_line_str, char **argv, size_t *argv_len, 
+  uint32_t argc, void** esp);
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -64,7 +66,7 @@ start_process (void *file_name_)
 {
   char *file_name = file_name_;
   struct intr_frame if_;
-  bool success;
+  bool success = true;
 
   char **argv;
   size_t *argv_len;
@@ -84,8 +86,9 @@ start_process (void *file_name_)
   if(argv_len == NULL)
     success = false;
   
-  success = load (file_name, &if_.eip, &if_.esp);
-  success = success && setup_args_stack(file_name, &if_.esp);
+  parse_args(file_name, argv, argv_len, &argc);
+  success = load (file_name, &if_.eip, &if_.esp) && success;
+  setup_args_stack(file_name, argv, argv_len, argc, &if_.esp);
   
   /* If load failed, quit. */
   palloc_free_page (file_name);
@@ -106,51 +109,52 @@ start_process (void *file_name_)
 }
 
 static void
-parse_args(char *cmd_line_str, char ***argv, size_t **argv_len, uint32_t *argc)
+parse_args(char *cmd_line_str, char **argv, size_t *argv_len, uint32_t *argc)
 {
   char *arg, *save_ptr;
   for(arg = strtok_r(cmd_line_str," ",&save_ptr); arg != NULL; 
     arg = strtok_r(NULL," ", &save_ptr))
   {
-    (*argv_len)[*argc] = strlen(arg) + 1;
-    (*argv)[*argc] = arg;
-    *argc++;
+    argv_len[*argc] = strlen(arg) + 1;
+    argv[*argc] = arg;
+    (*argc)++;
   }
 }
 
-static bool
-setup_args_stack(char *cmd_line_str, void** esp)
+static void
+setup_args_stack(char *cmd_line_str, char **argv, size_t *argv_len, uint32_t argc, 
+  void** esp)
 {
-  char **argv;
-  size_t *argv_len;
-  uint32_t argc = 0;
+  // char **argv;
+  // size_t *argv_len;
+  // uint32_t argc = 0;
 
-  bool success = true;
+  // bool success = true;
   
-  argv = palloc_get_page(0);
-  if(argv == NULL)
-    success = false;
+  // argv = palloc_get_page(0);
+  // if(argv == NULL)
+  //   success = false;
 
-  argv_len = palloc_get_page(0);
-  if(argv_len == NULL)
-    success = false;
+  // argv_len = palloc_get_page(0);
+  // if(argv_len == NULL)
+  //   success = false;
 
-  if(success == false)
-  {
-    palloc_free_page(argv);
-    palloc_free_page(argv_len);
+  // if(success == false)
+  // {
+  //   palloc_free_page(argv);
+  //   palloc_free_page(argv_len);
 
-    return false;
-  }
+  //   return false;
+  // }
 
-  char *arg, *save_ptr;
-  for(arg = strtok_r(cmd_line_str," ",&save_ptr); arg != NULL; 
-    arg = strtok_r(NULL," ", &save_ptr))
-  {
-    argv_len[argc] = strlen(arg) + 1;
-    argv[argc] = arg;
-    argc++;
-  }
+  // char *arg, *save_ptr;
+  // for(arg = strtok_r(cmd_line_str," ",&save_ptr); arg != NULL; 
+  //   arg = strtok_r(NULL," ", &save_ptr))
+  // {
+  //   argv_len[argc] = strlen(arg) + 1;
+  //   argv[argc] = arg;
+  //   argc++;
+  // }
   
   char* ptr_argv = (char*) *esp;
   for(int i = argc-1; i >= 0; i--)
@@ -185,8 +189,6 @@ setup_args_stack(char *cmd_line_str, void** esp)
   
   void* ori_if_esp = *esp;
   *esp = (void*) ptr_argv_addr;
-
-  return true;
 }
 
 // TODO: 임시 구현임. 추후 삭제 필요.

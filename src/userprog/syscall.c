@@ -74,6 +74,9 @@ syscall_handler (struct intr_frame *f)
       get_args(f->esp, arg, 1);
       sys_exit(arg[0]);
       break;
+    case SYS_WRITE:
+      get_args(f->esp, arg, 3);
+      sys_write(arg[0], (const void *)arg[1], (unsigned)arg[2]);
     default:
       ;
   }
@@ -90,10 +93,29 @@ sys_halt()
 }
 
 void
-sys_exit(int exit_code)
+sys_exit(int status)
 {
   struct thread *cur = thread_current();
-  printf("%s: exit(%d)\n", cur->name, exit_code);
+  printf("%s: exit(%d)\n", cur->name, status);
   thread_exit();
   NOT_REACHED();
+}
+
+int
+sys_write(int fd, const void *buffer, unsigned size)
+{
+  if(!check_ptr_in_user_space(buffer))
+    sys_exit(-1);
+  if(fd == 0)
+    sys_exit(-1);
+  else if(fd == 1)
+  {
+    putbuf(buffer, size);
+    return size;
+  }
+  else
+  {
+    /* TODO: Implement this */
+    return -1;
+  }
 }

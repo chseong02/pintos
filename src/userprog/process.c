@@ -20,6 +20,7 @@
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
+static bool setup_args_stack(char *cmd_line_str, void** esp);
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -65,70 +66,32 @@ start_process (void *file_name_)
   struct intr_frame if_;
   bool success;
 
+  char **argv;
+  size_t *argv_len;
+  uint32_t argc = 0;
+
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
   
-  /*------------------------------------------*/
-  success = load (file_name, &if_.eip, &if_.esp);
-  
-  char **argv;
-  size_t *argv_len;
-  uint32_t argc = 0;
-
   argv = palloc_get_page(0);
   if(argv == NULL)
-    thread_exit();
+    success = false;
 
   argv_len = palloc_get_page(0);
   if(argv_len == NULL)
-    thread_exit();
-
-  char *arg, *save_ptr;
+    success = false;
   
-  for(arg = strtok_r(file_name_," ",&save_ptr); arg != NULL; 
-    arg = strtok_r(NULL," ", &save_ptr))
-  {
-    argv_len[argc] = strlen(arg) + 1;
-    argv[argc] = arg;
-    argc++;
-  }
-
+  success = load (file_name, &if_.eip, &if_.esp);
+  success = success && setup_args_stack(file_name, &if_.esp);
   
-  char* ptr = (char*) if_.esp;
-  for(int i=argc-1; i >= 0; i--)
-  {
-    ptr = ptr - (char*)(argv_len[i]);
-    strlcpy (ptr, (const char*)argv[i],(size_t) (argv_len[i]));
-  }
-
-  ptr = (char *)(((uint32_t) ptr) - (4-(((uint32_t) ptr) % 4)) % 4);
-
-  ptr -= 4;
-  *((uint32_t *)ptr) = 0;
-  ptr -= 4;
-  char* argv_addr_ptr= (char*)if_.esp; 
-  char** ptr_= (char **)ptr;
-  for(int i=argc-1; i >= 0; i--)
-  {
-    argv_addr_ptr -= argv_len[i];
-    *ptr_ = (char *) argv_addr_ptr;
-    ptr_--;
-  }
-  *ptr_= (char**)(ptr_+ 1);
-  ptr_--;
-  *(uint32_t*)ptr_ = argc;
-  ptr_--;
-  *ptr_ = 0;
-  void* ori_if_esp = if_.esp;
-  if_.esp = (void*) ptr_;
-  /*------------------------------------------*/
-  
-
   /* If load failed, quit. */
   palloc_free_page (file_name);
+  palloc_free_page(argv);
+  palloc_free_page(argv_len);
+
   if (!success) 
     thread_exit ();
   //printf("여긴?");
@@ -140,6 +103,19 @@ start_process (void *file_name_)
      and jump to it. */
   asm volatile ("movl %0, %%esp; jmp intr_exit" : : "g" (&if_) : "memory");
   NOT_REACHED ();
+}
+
+static void
+parse_args(char *cmd_line_str, char ***argv, size_t **argv_len, uint32_t *argc)
+{
+  char *arg, *save_ptr;
+  for(arg = strtok_r(cmd_line_str," ",&save_ptr); arg != NULL; 
+    arg = strtok_r(NULL," ", &save_ptr))
+  {
+    (*argv_len)[*argc] = strlen(arg) + 1;
+    (*argv)[*argc] = arg;
+    *argc++;
+  }
 }
 
 static bool
@@ -163,6 +139,8 @@ setup_args_stack(char *cmd_line_str, void** esp)
   {
     palloc_free_page(argv);
     palloc_free_page(argv_len);
+
+    return false;
   }
 
   char *arg, *save_ptr;
@@ -207,6 +185,8 @@ setup_args_stack(char *cmd_line_str, void** esp)
   
   void* ori_if_esp = *esp;
   *esp = (void*) ptr_argv_addr;
+
+  return true;
 }
 
 // TODO: 임시 구현임. 추후 삭제 필요.

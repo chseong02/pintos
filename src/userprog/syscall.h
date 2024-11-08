@@ -3,9 +3,11 @@
 
 #include "lib/stdint.h"
 #include "lib/stdbool.h"
+#include "lib/stddef.h"
 
-void get_args(int *sp, int *dst, int num);
+void get_args(int *sp, int *dest, size_t num);
 bool check_ptr_in_user_space(const void *ptr);
+bool get_user_bytes(void *dest, const void *src, size_t num);
 
 void syscall_init (void);
 

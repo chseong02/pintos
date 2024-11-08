@@ -180,7 +180,7 @@ process_wait (tid_t child_tid)
     thread_foreach(check_thread_exist,&tid);
     intr_set_level (old_level);
     if(tid!=-1){
-      printf("난 끝!\n");
+      // printf("난 끝!\n");
       return 1;
     }
   }

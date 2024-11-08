@@ -35,6 +35,30 @@ put_user (uint8_t *udst, uint8_t byte)
   return error_code != -1;
 }
 
+/* Reads NUM bytes at user address SRC, stores at DEST.
+   Note that DEST is not a vmem address.
+   Returns true if every byte copies are successful. */
+bool
+get_user_bytes(void *dest, const void *src, size_t num)
+{
+  uint8_t *_dest = dest;
+  const uint8_t *_src = src;
+  // printf("src: %p, dest: %p\n", _src, _dest);
+  for(size_t i = 0; i < num; i++)
+  {
+    if(!check_ptr_in_user_space(_src)) return false;
+    int res = get_user(_src);
+    if(res == -1) return false;
+    // printf("%02hhx ", res);
+    *_dest = (uint8_t)res;
+    _dest++;
+    _src++;
+  }
+  // printf("\n");
+  return true;
+}
+
+/* Only checks whether its in the user space */
 bool
 check_ptr_in_user_space(const void *ptr)
 {
@@ -48,17 +72,17 @@ syscall_init (void)
 }
 
 void
-  get_args(int *sp, int *dst, int num)
+get_args(int *sp, int *dest, size_t num)
 {
-  for(int i = 0; i < num; i++)
+  for(size_t i = 0; i < num; i++)
   {
     int *src = sp + i + 1;
-    if(check_ptr_in_user_space(src)) dst[i] = *src;
-    
-    else sys_exit(-1);
-    //hex_dump()
-    printf("%x",dst[i]);
+    if(!check_ptr_in_user_space(src)) sys_exit(-1);
+    if(!get_user_bytes(dest + i, src, 4)) sys_exit(-1);
+    // dest[i] = *src;
+    // printf("Arg %u: %x\n", i, dest[i]);
   }
+  // printf("ESP: %p\n", sp);
 }
 
 static void
@@ -68,7 +92,6 @@ syscall_handler (struct intr_frame *f)
   
   int arg[4];
 
-  //TODO: pointer 검증 필요할지도?
   //printf("시스템콜 디버깅!\n");
   switch(*(uint32_t *)(f->esp)) {
     case SYS_HALT:
@@ -81,7 +104,7 @@ syscall_handler (struct intr_frame *f)
     case SYS_WRITE:
       //printf("프린트\n");
       get_args(f->esp, arg, 3);
-      hex_dump(0,f->esp,100,true);
+      // hex_dump(0,f->esp,100,true);
       sys_write(arg[0], (const void *)arg[1], (unsigned)arg[2]);
     default:
     //printf("기본처리\n");
@@ -121,9 +144,9 @@ sys_write(int fd, const void *buffer, unsigned size)
     
   else if(fd == 1)
   {
-    printf("출력 가능\n");
+    // printf("출력 가능\n");
     //printf("%s",(char *)buffer);
-    putbuf(buffer, 5);
+    putbuf(buffer, size);
     return size;
   }
   else

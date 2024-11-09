@@ -32,6 +32,12 @@ static void setup_args_stack(char **argv, size_t *argv_len,
   uint32_t argc, void** esp);
 static pid_t allocate_pid (void);
 
+void
+process_init(void)
+{
+  lock_init(&pid_lock);
+}
+
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
    before process_execute() returns.  Returns the new process's
@@ -62,17 +68,20 @@ process_execute (const char *file_name)
   struct process *p;
   p = palloc_get_page (PAL_ZERO);
   if(p == NULL)
+  {
     palloc_free_page(p);
     return TID_ERROR;
+  }
   init_process(p);
   /*--------------------------------------------------------*/
 
   /* Create a new thread to execute FILE_NAME. */
+  
   tid = thread_create_with_pcb (file_name_copy, PRI_DEFAULT, p, start_process, full_cmd_line_copy);
   palloc_free_page (file_name_copy);
   if (tid == TID_ERROR)
     palloc_free_page (full_cmd_line_copy);
-  
+  sema_down(&(p->exec_load_sema));
   return tid;
 }
 
@@ -106,6 +115,7 @@ start_process (void *file_name_)
   parse_args(file_name, argv, argv_len, &argc);
   success = load (file_name, &if_.eip, &if_.esp) && success;
   setup_args_stack(argv, argv_len, argc, &if_.esp);
+  sema_up(&(thread_current()->process_ptr->exec_load_sema));
   
   /* If load failed, quit. */
   palloc_free_page (file_name);

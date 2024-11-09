@@ -105,6 +105,10 @@ syscall_handler (struct intr_frame *f)
       get_args(f->esp, arg, 1);
       sys_exit(arg[0]);
       break;
+    case SYS_EXEC:
+      get_args(f->esp, arg, 1);
+      sys_exec((const char *)(arg[0]));
+      break;
     case SYS_WRITE:
       //printf("프린트\n");
       get_args(f->esp, arg, 3);
@@ -129,9 +133,8 @@ sys_halt()
 static pid_t
 sys_exec(const char *cmd_line)
 {
-
-
-
+  tid_t tid = process_execute(cmd_line);
+  return tid;
 }
 
 void

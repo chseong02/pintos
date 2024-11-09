@@ -18,6 +18,13 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 
+/*---------------------------------------------------------------------------*/
+/* Process Control Block */
+
+static struct lock pid_lock;
+
+/*---------------------------------------------------------------------------*/
+
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 static void parse_args(char *cmd_line_str, char **argv, size_t *argv_len, uint32_t *argc);
@@ -569,4 +576,20 @@ install_page (void *upage, void *kpage, bool writable)
      address, then map our page there. */
   return (pagedir_get_page (t->pagedir, upage) == NULL
           && pagedir_set_page (t->pagedir, upage, kpage, writable));
+}
+
+/*---------------------------------------------------------------------------*/
+/* Process Control Block */
+
+static pid_t
+allocate_pid (void)
+{
+  static pid_t next_pid = 1;
+  pid_t pid;
+
+  lock_acquire (&pid_lock);
+  pid = next_pid++;
+  lock_release (&pid_lock);
+
+  return pid;
 }

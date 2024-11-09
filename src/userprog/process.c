@@ -1,4 +1,3 @@
-#include "userprog/process.h"
 #include <debug.h>
 #include <inttypes.h>
 #include <round.h>
@@ -7,6 +6,7 @@
 #include <string.h>
 #include "userprog/gdt.h"
 #include "userprog/pagedir.h"
+#include "userprog/process.h"
 #include "userprog/tss.h"
 #include "filesys/directory.h"
 #include "filesys/file.h"
@@ -17,6 +17,7 @@
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "lib/user/syscall.h"
 
 /*---------------------------------------------------------------------------*/
 /* Process Control Block */
@@ -93,7 +94,7 @@ process_execute (const char *file_name)
   if (tid == TID_ERROR)
     palloc_free_page (full_cmd_line_copy);
   sema_down(&(p->exec_load_sema));
-  if(p->pid == -1){
+  if(p->pid == PID_ERROR){
     return TID_ERROR;
   }
   return tid;
@@ -131,7 +132,7 @@ start_process (void *file_name_)
   if(success)
     setup_args_stack(argv, argv_len, argc, &if_.esp);
   if(success==false){
-    thread_current()->process_ptr->pid = TID_ERROR;
+    thread_current()->process_ptr->pid = PID_ERROR;
   }
   sema_up(&(thread_current()->process_ptr->exec_load_sema));
   

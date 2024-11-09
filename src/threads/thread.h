@@ -96,6 +96,7 @@ struct thread
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
+    struct process* process_ptr;
 #endif
 
     /* Owned by thread.c. */
@@ -115,6 +116,7 @@ void thread_print_stats (void);
 
 typedef void thread_func (void *aux);
 tid_t thread_create (const char *name, int priority, thread_func *, void *);
+tid_t thread_create_with_pcb (const char *name, int priority, struct process* p_ptr, thread_func *, void *);
 
 void thread_block (void);
 void thread_unblock (struct thread *);

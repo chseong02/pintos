@@ -4,10 +4,14 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "threads/palloc.h"
+#include "userprog/process.h"
 
 static void syscall_handler (struct intr_frame *);
 static int get_user (const uint8_t *uaddr);
 static bool put_user (uint8_t *udst, uint8_t byte);
+
+static pid_t sys_exec(const char *cmd_line);
 
  	
 /* Reads a byte at user virtual address UADDR.
@@ -120,6 +124,14 @@ sys_halt()
 {
   shutdown_power_off();
   NOT_REACHED();
+}
+
+static pid_t
+sys_exec(const char *cmd_line)
+{
+
+
+
 }
 
 void

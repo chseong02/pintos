@@ -22,4 +22,6 @@ struct process
   struct semaphore exec_load_sema;
 };
 
+void init_process (struct process*);
+
 #endif /* userprog/process.h */

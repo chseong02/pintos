@@ -30,6 +30,7 @@ static bool load (const char *cmdline, void (**eip) (void), void **esp);
 static void parse_args(char *cmd_line_str, char **argv, size_t *argv_len, uint32_t *argc);
 static void setup_args_stack(char **argv, size_t *argv_len, 
   uint32_t argc, void** esp);
+static pid_t allocate_pid (void);
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -57,8 +58,17 @@ process_execute (const char *file_name)
 
   strtok_r (file_name_copy, " ", &save_ptr);
   
+  /*--------------------------------------------------------*/
+  struct process *p;
+  p = palloc_get_page (PAL_ZERO);
+  if(p == NULL)
+    palloc_free_page(p);
+    return TID_ERROR;
+  init_process(p);
+  /*--------------------------------------------------------*/
+
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (file_name_copy, PRI_DEFAULT, start_process, full_cmd_line_copy);
+  tid = thread_create_with_pcb (file_name_copy, PRI_DEFAULT, p, start_process, full_cmd_line_copy);
   palloc_free_page (file_name_copy);
   if (tid == TID_ERROR)
     palloc_free_page (full_cmd_line_copy);
@@ -594,7 +604,7 @@ allocate_pid (void)
   return pid;
 }
 
-static void
+void
 init_process (struct process *p)
 {
   memset (p, 0, sizeof *p);

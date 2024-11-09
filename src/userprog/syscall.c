@@ -106,42 +106,42 @@ syscall_handler (struct intr_frame *f)
       break;
     case SYS_EXEC:
       get_args(f->esp, arg, 1);
-      sys_exec((const char *)arg[0]);
+      f->eax = sys_exec((const char *)arg[0]);
       break;
     case SYS_WAIT:
       get_args(f->esp, arg, 1);
-      sys_wait((pid_t)arg[0]);
+      f->eax = sys_wait((pid_t)arg[0]);
       break;
     case SYS_CREATE:
       get_args(f->esp, arg, 2);
-      sys_create((const char *)arg[0], (unsigned)arg[1]);
+      f->eax = sys_create((const char *)arg[0], (unsigned)arg[1]);
       break;
     case SYS_REMOVE:
       get_args(f->esp, arg, 1);
-      sys_remove((const char *)arg[0]);
+      f->eax = sys_remove((const char *)arg[0]);
       break;
     case SYS_OPEN:
       get_args(f->esp, arg, 1);
-      sys_open((const char *)arg[0]);
+      f->eax = sys_open((const char *)arg[0]);
       break;
     case SYS_FILESIZE:
       get_args(f->esp, arg, 1);
-      sys_filesize(arg[0]);
+      f->eax = sys_filesize(arg[0]);
       break;
     case SYS_READ:
       get_args(f->esp, arg, 3);
-      sys_read(arg[0], (void *)arg[1], (unsigned)arg[2]);
+      f->eax = sys_read(arg[0], (void *)arg[1], (unsigned)arg[2]);
       break;
     case SYS_WRITE:
       get_args(f->esp, arg, 3);
-      sys_write(arg[0], (const void *)arg[1], (unsigned)arg[2]);
+      f->eax = sys_write(arg[0], (const void *)arg[1], (unsigned)arg[2]);
     case SYS_SEEK:
       get_args(f->esp, arg, 2);
       sys_seek(arg[0], (unsigned)arg[1]);
       break;
     case SYS_TELL:
       get_args(f->esp, arg, 1);
-      sys_tell(arg[0]);
+      f->eax = sys_tell(arg[0]);
       break;
     case SYS_CLOSE:
       get_args(f->esp, arg, 1);

@@ -73,6 +73,7 @@ process_execute (const char *file_name)
     return TID_ERROR;
   }
   init_process(p);
+  list_push_back(&(thread_current()->process_ptr->children),&(p->elem));
   /*--------------------------------------------------------*/
 
   /* Create a new thread to execute FILE_NAME. */

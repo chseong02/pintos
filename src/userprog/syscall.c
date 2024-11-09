@@ -6,6 +6,7 @@
 #include "threads/vaddr.h"
 #include "threads/palloc.h"
 #include "userprog/process.h"
+#include <list.h>
 
 static void syscall_handler (struct intr_frame *);
 static int get_user (const uint8_t *uaddr);
@@ -178,6 +179,8 @@ sys_exit(int status)
 {
   struct thread *cur = thread_current();
   printf("%s: exit(%d)\n", cur->name, status);
+  cur->process_ptr->exit_code = status;
+  sema_up(&(cur->process_ptr->exit_code_sema));
   thread_exit();
   NOT_REACHED();
 }
@@ -185,7 +188,17 @@ sys_exit(int status)
 int
 sys_wait(pid_t pid)
 {
-  // TODO
+  struct thread *cur = thread_current();
+  struct list* children = &(cur->process_ptr->children);
+  for (struct list_elem *e = list_begin(children);e!=list_end(children); e=list_next(e))
+  {
+    struct process *p =list_entry(e, struct process, elem);
+    if(p->pid == pid)
+    {
+      sema_down(&(p->exit_code_sema));
+      return p->exit_code;
+    }
+  }
   return -1;
 }
 

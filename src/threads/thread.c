@@ -96,6 +96,17 @@ thread_init (void)
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread ();
   init_thread (initial_thread, "main", PRI_DEFAULT);
+  /*--------------------------------------------------------*/
+  struct process *p;
+  p = palloc_get_page (PAL_ZERO);
+  if(p == NULL)
+  {
+    palloc_free_page(p);
+    PANIC("Main Process Init Fail");
+  }
+  init_process(p);
+  initial_thread->process_ptr = p;
+  /*--------------------------------------------------------*/
   initial_thread->status = THREAD_RUNNING;
   initial_thread->tid = allocate_tid ();
 }

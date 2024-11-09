@@ -593,3 +593,15 @@ allocate_pid (void)
 
   return pid;
 }
+
+static void
+init_process (struct process *p)
+{
+  memset (p, 0, sizeof *p);
+  p->pid = allocate_pid();
+  sema_init(&(p->exit_code_sema), 0);
+  sema_init(&(p->exec_load_sema), 0);
+  list_init(&(p->children));
+  //TODO: current process
+  //list_push_back(, &(p->elem));
+}

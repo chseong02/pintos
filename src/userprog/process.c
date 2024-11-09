@@ -82,6 +82,9 @@ process_execute (const char *file_name)
   if (tid == TID_ERROR)
     palloc_free_page (full_cmd_line_copy);
   sema_down(&(p->exec_load_sema));
+  if(p->pid == -1){
+    return TID_ERROR;
+  }
   return tid;
 }
 
@@ -115,6 +118,9 @@ start_process (void *file_name_)
   parse_args(file_name, argv, argv_len, &argc);
   success = load (file_name, &if_.eip, &if_.esp) && success;
   setup_args_stack(argv, argv_len, argc, &if_.esp);
+  if(success==false){
+    thread_current()->process_ptr->pid = TID_ERROR;
+  }
   sema_up(&(thread_current()->process_ptr->exec_load_sema));
   
   /* If load failed, quit. */

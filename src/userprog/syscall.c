@@ -188,15 +188,17 @@ sys_wait(pid_t pid)
 bool
 sys_create(const char *file, unsigned initial_size)
 {
-  // TODO
-  return false;
+  if(file == NULL || !check_ptr_in_user_space(file))
+    sys_exit(-1);
+  return filesys_create(file, initial_size);
 }
 
 bool
 sys_remove(const char *file)
 {
-  // TODO
-  return false;
+  if(file == NULL || !check_ptr_in_user_space(file))
+    sys_exit(-1);
+  return filesys_remove(file);
 }
 
 int

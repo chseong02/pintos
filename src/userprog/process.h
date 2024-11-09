@@ -15,6 +15,7 @@ void process_activate (void);
 struct process
 {
   pid_t pid;
+  tid_t tid;
   int exit_code;
   struct semaphore exit_code_sema;
   //TODO: FDT

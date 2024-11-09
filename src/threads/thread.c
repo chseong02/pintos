@@ -226,6 +226,7 @@ thread_create_with_pcb (const char *name, int priority, struct process* p_ptr,
   tid = t->tid = allocate_tid ();
 
   t->process_ptr = p_ptr;
+  t->process_ptr->tid=tid;
 
   /* Stack frame for kernel_thread(). */
   kf = alloc_frame (t, sizeof *kf);

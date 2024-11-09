@@ -45,6 +45,7 @@ process_init(void)
   }
   init_process(p);
   thread_current()->process_ptr = p;
+  p->tid = thread_current()->tid;
 }
 
 /* Starts a new thread running a user program loaded from
@@ -127,7 +128,8 @@ start_process (void *file_name_)
   
   parse_args(file_name, argv, argv_len, &argc);
   success = load (file_name, &if_.eip, &if_.esp) && success;
-  setup_args_stack(argv, argv_len, argc, &if_.esp);
+  if(success)
+    setup_args_stack(argv, argv_len, argc, &if_.esp);
   if(success==false){
     thread_current()->process_ptr->pid = TID_ERROR;
   }
@@ -225,16 +227,21 @@ check_thread_exist(struct thread *t, void *aux)
 int
 process_wait (tid_t child_tid) 
 {
-  // TODO: 무한 루프 임시구현
-  while(1){
-    enum intr_level old_level;
-    old_level = intr_disable ();
-    tid_t tid = child_tid;
-    thread_foreach(check_thread_exist,&tid);
-    intr_set_level (old_level);
-    if(tid!=-1){
-      //printf("난 끝!\n");
-      return 1;
+  if(child_tid == TID_ERROR){
+    return -1;
+  }
+  struct thread *cur = thread_current();
+  struct list* children = &(cur->process_ptr->children);
+  for (struct list_elem *e = list_begin(children);e!=list_end(children); e=list_next(e))
+  {
+    struct process *p =list_entry(e, struct process, elem);
+    if(p->tid == child_tid)
+    {
+      sema_down(&(p->exit_code_sema));
+      list_remove(e);
+      int exit_code = p->exit_code;
+      //TODO: free pcb
+      return exit_code;
     }
   }
   return -1;

@@ -95,6 +95,9 @@ syscall_handler (struct intr_frame *f)
   //printf ("system call!\n");
   
   int arg[4];
+  // hex_dump(0,f->esp,100,true);
+  if(!check_ptr_in_user_space(f->esp))
+    sys_exit(-1);
 
   //printf("시스템콜 디버깅!\n");
   switch(*(uint32_t *)(f->esp)) {
@@ -107,16 +110,49 @@ syscall_handler (struct intr_frame *f)
       break;
     case SYS_EXEC:
       get_args(f->esp, arg, 1);
-      sys_exec((const char *)(arg[0]));
+      sys_exec((const char *)arg[0]);
+      break;
+    case SYS_WAIT:
+      get_args(f->esp, arg, 1);
+      sys_wait((pid_t)arg[0]);
+      break;
+    case SYS_CREATE:
+      get_args(f->esp, arg, 2);
+      sys_create((const char *)arg[0], (unsigned)arg[1]);
+      break;
+    case SYS_REMOVE:
+      get_args(f->esp, arg, 1);
+      sys_remove((const char *)arg[0]);
+      break;
+    case SYS_OPEN:
+      get_args(f->esp, arg, 1);
+      sys_open((const char *)arg[0]);
+      break;
+    case SYS_FILESIZE:
+      get_args(f->esp, arg, 1);
+      sys_filesize(arg[0]);
+      break;
+    case SYS_READ:
+      get_args(f->esp, arg, 3);
+      sys_read(arg[0], (void *)arg[1], (unsigned)arg[2]);
       break;
     case SYS_WRITE:
-      //printf("프린트\n");
       get_args(f->esp, arg, 3);
-      // hex_dump(0,f->esp,100,true);
       sys_write(arg[0], (const void *)arg[1], (unsigned)arg[2]);
+    case SYS_SEEK:
+      get_args(f->esp, arg, 2);
+      sys_seek(arg[0], (unsigned)arg[1]);
+      break;
+    case SYS_TELL:
+      get_args(f->esp, arg, 1);
+      sys_tell(arg[0]);
+      break;
+    case SYS_CLOSE:
+      get_args(f->esp, arg, 1);
+      sys_close(arg[0]);
+      break;
     default:
-    //printf("기본처리\n");
-      ;
+      sys_exit(-1);
   }
   
   //TODO: 구현 완료시 exit 삭제
@@ -146,6 +182,55 @@ sys_exit(int status)
   NOT_REACHED();
 }
 
+pid_t
+sys_exec(const char *cmd_line)
+{
+  // TODO
+  return -1;
+}
+
+int
+sys_wait(pid_t pid)
+{
+  // TODO
+  return -1;
+}
+
+bool
+sys_create(const char *file, unsigned initial_size)
+{
+  // TODO
+  return false;
+}
+
+bool
+sys_remove(const char *file)
+{
+  // TODO
+  return false;
+}
+
+int
+sys_open(const char *file)
+{
+  // TODO
+  return -1;
+}
+
+int
+sys_filesize(int fd)
+{
+  // TODO
+  return 0;
+}
+
+int
+sys_read(int fd, void *buffer, unsigned size)
+{
+  // TODO
+  return -1;
+}
+
 int
 sys_write(int fd, const void *buffer, unsigned size)
 {
@@ -169,4 +254,25 @@ sys_write(int fd, const void *buffer, unsigned size)
     /* TODO: Implement this */
     return -1;
   }
+}
+
+void
+sys_seek(int fd, unsigned position)
+{
+  // TODO
+  return;
+}
+
+unsigned
+sys_tell(int fd)
+{
+  // TODO
+  return -1;
+}
+
+void
+sys_close(int fd)
+{
+  // TODO
+  return;
 }

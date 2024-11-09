@@ -14,7 +14,6 @@ void syscall_init (void);
 
 void sys_halt();
 void sys_exit(int status);
-pid_t sys_exec(const char *cmd_line);
 int sys_wait(pid_t pid);
 bool sys_create(const char *file, unsigned initial_size);
 bool sys_remove(const char *file);

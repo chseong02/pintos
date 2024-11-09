@@ -182,13 +182,6 @@ sys_exit(int status)
   NOT_REACHED();
 }
 
-pid_t
-sys_exec(const char *cmd_line)
-{
-  // TODO
-  return -1;
-}
-
 int
 sys_wait(pid_t pid)
 {

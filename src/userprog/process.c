@@ -36,6 +36,15 @@ void
 process_init(void)
 {
   lock_init(&pid_lock);
+  struct process *p;
+  p = palloc_get_page (PAL_ZERO);
+  if(p == NULL)
+  {
+    palloc_free_page(p);
+    PANIC("Main Process Init Fail");
+  }
+  init_process(p);
+  thread_current()->process_ptr = p;
 }
 
 /* Starts a new thread running a user program loaded from

@@ -171,7 +171,11 @@ static pid_t
 sys_exec(const char *cmd_line)
 {
   tid_t tid = process_execute(cmd_line);
-  return tid;
+  if(tid == TID_ERROR)
+    return TID_ERROR;
+  struct list_elem *elem= list_back(&(thread_current()->process_ptr->children));
+  struct process *p= list_entry(elem,struct process, elem);
+  return p->pid;
 }
 
 void
@@ -196,7 +200,10 @@ sys_wait(pid_t pid)
     if(p->pid == pid)
     {
       sema_down(&(p->exit_code_sema));
-      return p->exit_code;
+      list_remove(e);
+      int exit_code = p->exit_code;
+      //TODO: free pcb
+      return exit_code;
     }
   }
   return -1;

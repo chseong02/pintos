@@ -123,11 +123,17 @@ start_process (void *file_name_)
 {
   char *file_name = file_name_;
   struct intr_frame if_;
-  bool success = true;
+  bool success;
+  struct thread *t;
 
+  /* argv: process arguments str point array */
+  /* argv_len: process arguments str length array */
+  /* argc: process arguments count */
   char **argv;
   size_t *argv_len;
   uint32_t argc = 0;
+  success = true;
+  t = thread_current();
 
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
@@ -135,28 +141,30 @@ start_process (void *file_name_)
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
   
-  argv = palloc_get_page(0);
-  if(argv == NULL)
+  argv = palloc_get_page (0);
+  if (argv == NULL)
     success = false;
 
-  argv_len = palloc_get_page(0);
-  if(argv_len == NULL)
+  argv_len = palloc_get_page (0);
+  if (argv_len == NULL)
     success = false;
   
-  parse_args(file_name, argv, argv_len, &argc);
+  /* file_name stops at the null character only at the end of the pure file name */
+  parse_args (file_name, argv, argv_len, &argc);
   success = load (file_name, &if_.eip, &if_.esp) && success;
-  if(success)
-    setup_args_stack(argv, argv_len, argc, &if_.esp);
-  if(success==false){
-    thread_current()->process_ptr->pid = PID_ERROR;
-  }
-  sema_up(&(thread_current()->process_ptr->exec_load_sema));
-  
-  /* If load failed, quit. */
-  palloc_free_page (file_name);
-  palloc_free_page(argv);
-  palloc_free_page(argv_len);
+  if (success)
+    setup_args_stack (argv, argv_len, argc, &if_.esp);
+  else
+    t->process_ptr->pid = PID_ERROR;
 
+  /* System call Exec Load Sync */
+  sema_up (&t->process_ptr->exec_load_sema);
+  
+  palloc_free_page (file_name);
+  palloc_free_page (argv);
+  palloc_free_page (argv_len);
+
+  /* If load failed, quit. */
   if (!success) 
     thread_exit ();
   /* Start the user process by simulating a return from an

@@ -273,20 +273,58 @@ sys_filesize(int fd)
   struct fd_table_entry *fd_entry = &(cur->fd_table[fd]);
   if(!(fd_entry->in_use && 
        fd_entry->type == FILETYPE_FILE && 
-       fd_entry->file != NULL &&
-       check_ptr_in_user_space(fd_entry->file)))
+       fd_entry->file != NULL))
        return -1;
   
   file_lock_acquire();
-  return file_length(fd_entry->file);
+  int res = file_length(fd_entry->file);
   file_lock_release();
+
+  return res;
 }
 
 int
 sys_read(int fd, void *buffer, unsigned size)
 {
-  // TODO
-  return -1;
+  if(!check_ptr_in_user_space(buffer))
+    sys_exit(-1);
+  if(!(0 <= fd && fd < OPEN_MAX))
+    return -1;
+  
+  struct process *cur = thread_current()->process_ptr;
+
+  if(!cur->fd_table[fd].in_use)
+    return -1;
+  
+  int file_type = cur->fd_table[fd].type;
+  if(file_type == FILETYPE_STDIN)
+  {
+    void *cur_pos = buffer;
+    unsigned write_count = 0;
+    while(write_count < size)
+    {
+      if(!check_ptr_in_user_space(cur_pos))
+        sys_exit(-1);
+      uint8_t c = input_getc();
+      if(!put_user((uint8_t *)cur_pos, c))
+        sys_exit(-1);
+      write_count++;
+      cur_pos++;
+    }
+    return write_count;
+  } 
+  else if(file_type == FILETYPE_STDOUT)
+  {
+    /* Actually it also works same as STDIN in LINUX */
+    sys_exit(-1);
+  }
+  else
+  {
+    file_lock_acquire();
+    int res = file_read(cur->fd_table[fd].file, buffer, size);
+    file_lock_release();
+    return res;
+  }
 }
 
 int
@@ -305,7 +343,7 @@ sys_write(int fd, const void *buffer, unsigned size)
   int file_type = cur->fd_table[fd].type;
   if(file_type == FILETYPE_STDIN)
   {
-    /* Actually it also prints through console in LINUX */
+    /* Actually it also works same as STDOUT in LINUX */
     sys_exit(-1);
   } 
   else if(file_type == FILETYPE_STDOUT)
@@ -315,8 +353,10 @@ sys_write(int fd, const void *buffer, unsigned size)
   }
   else
   {
-    /* TODO: Implement this */
-    return -1;
+    file_lock_acquire();
+    int res = file_write(cur->fd_table[fd].file, buffer, size);
+    file_lock_release();
+    return res;
   }
 }
 

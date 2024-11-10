@@ -35,6 +35,7 @@ struct process
   struct list children;
   struct list_elem elem;
   struct semaphore exec_load_sema;
+  struct file *file_exec;
   struct fd_table_entry fd_table[OPEN_MAX];
 };
 

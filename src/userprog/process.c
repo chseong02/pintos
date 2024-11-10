@@ -701,7 +701,7 @@ set_fd(struct process *p, int fd, struct file *_file)
 void
 remove_fd(struct process *p, int fd)
 {
-  if(!(0 <= fd && fd < OPEN_MAX)) return;
+  if(!(2 <= fd && fd < OPEN_MAX)) return;
   /* Intended not to check the validity */
   p->fd_table[fd].in_use = false;
 }

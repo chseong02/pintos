@@ -676,6 +676,7 @@ get_available_fd(struct process *p)
 bool
 set_fd(struct process *p, int fd, struct file *_file)
 {
+  if(!(0 <= fd && fd < OPEN_MAX)) return false;
   if(!p->fd_table[fd].in_use) return false;
   p->fd_table[fd].file = _file;
   p->fd_table[fd].in_use = true;
@@ -688,6 +689,7 @@ set_fd(struct process *p, int fd, struct file *_file)
 void
 remove_fd(struct process *p, int fd)
 {
+  if(!(0 <= fd && fd < OPEN_MAX)) return;
   /* Intended not to check the validity */
   p->fd_table[fd].in_use = false;
 }

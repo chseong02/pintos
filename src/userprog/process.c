@@ -689,7 +689,7 @@ bool
 set_fd(struct process *p, int fd, struct file *_file)
 {
   if(!(0 <= fd && fd < OPEN_MAX)) return false;
-  if(!p->fd_table[fd].in_use) return false;
+  if(p->fd_table[fd].in_use) return false;
   p->fd_table[fd].file = _file;
   p->fd_table[fd].in_use = true;
   /* Currently there's no way to open STDIN or STDOUT

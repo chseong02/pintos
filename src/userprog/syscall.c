@@ -237,18 +237,28 @@ sys_open(const char *file)
   if(file == NULL || !check_ptr_in_user_space(file))
     sys_exit(-1);
   
+  /* Whole section is critical section due to open-twice test */
+  file_lock_acquire();
   struct process *cur = thread_current()->process_ptr;
 
   int fd = get_available_fd(cur);
-  if(fd == -1) return -1;
+  if(fd == -1)
+  {
+    file_lock_release();
+    return -1;
+  }
 
-  file_lock_acquire();
   struct file *target_file = filesys_open(file);
-  file_lock_release();
-  if(target_file == NULL) return -1;
+  if(target_file == NULL)
+  {
+    file_lock_release();
+    return -1;
+  }
 
   /* Should verify the return value but seems okay now */
   set_fd(cur, fd, target_file);
+
+  file_lock_release();
   return fd;
 }
 

@@ -177,25 +177,29 @@ start_process (void *file_name_)
   NOT_REACHED ();
 }
 
+/* Parse the cmd_line_str and store the starting addresses of the arguments in 
+   argv, the lengths of each argument in argv_len, 
+   and the number of arguments in argc. */
 static void
-parse_args(char *cmd_line_str, char **argv, size_t *argv_len, uint32_t *argc)
+parse_args (char *cmd_line_str, char **argv, size_t *argv_len, uint32_t *argc)
 {
   char *arg, *save_ptr;
-  for(arg = strtok_r(cmd_line_str," ",&save_ptr); arg != NULL; 
-    arg = strtok_r(NULL," ", &save_ptr))
+
+  for (arg = strtok_r (cmd_line_str, " ", &save_ptr); arg != NULL; 
+    arg = strtok_r (NULL, " ", &save_ptr))
   {
-    argv_len[*argc] = strlen(arg) + 1;
+    argv_len[*argc] = strlen (arg) + 1;
     argv[*argc] = arg;
     (*argc)++;
   }
 }
 
 static void
-setup_args_stack(char **argv, size_t *argv_len, uint32_t argc, 
-  void** esp)
+setup_args_stack (char **argv, size_t *argv_len, uint32_t argc, 
+  void **esp)
 {
-  char* ptr_argv = (char*) *esp;
-  for(int i = argc-1; i >= 0; i--)
+  char *ptr_argv = (char*) *esp;
+  for (int i = argc - 1; i >= 0; i--)
   {
     ptr_argv = ptr_argv - (char*)(argv_len[i]);
     strlcpy (ptr_argv, (const char*) argv[i], (size_t)(argv_len[i]));

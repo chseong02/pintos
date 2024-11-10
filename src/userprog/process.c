@@ -23,6 +23,7 @@
 /* Process Control Block */
 
 static struct lock pid_lock;
+static struct lock file_lock;
 
 /*---------------------------------------------------------------------------*/
 
@@ -37,6 +38,7 @@ void
 process_init(void)
 {
   lock_init(&pid_lock);
+  lock_init(&file_lock);
   struct process *p;
   p = palloc_get_page (PAL_ZERO);
   if(p == NULL)
@@ -646,6 +648,46 @@ init_process (struct process *p)
   sema_init(&(p->exit_code_sema), 0);
   sema_init(&(p->exec_load_sema), 0);
   list_init(&(p->children));
+
+  /* Initialize fd table */
+  for(size_t i = 0; i < OPEN_MAX; i++){
+    p->fd_table[i].file = NULL;
+    p->fd_table[i].in_use = false;
+    p->fd_table[i].type = FILETYPE_FILE;
+  }
+  p->fd_table[0].in_use = true;
+  p->fd_table[0].type = FILETYPE_STDIN;
+  p->fd_table[1].in_use = true;
+  p->fd_table[1].type = FILETYPE_STDOUT;
   //TODO: current process
   //list_push_back(, &(p->elem));
+}
+
+int
+get_available_fd(struct process *p)
+{
+  for(size_t i = 0; i < OPEN_MAX; i++){
+    if(!p->fd_table[i].in_use) return i;
+  }
+  /* No more available fd in the table */
+  return -1;
+}
+
+bool
+set_fd(struct process *p, int fd, struct file *_file)
+{
+  if(!p->fd_table[fd].in_use) return false;
+  p->fd_table[fd].file = _file;
+  p->fd_table[fd].in_use = true;
+  /* Currently there's no way to open STDIN or STDOUT
+     Unless there's dup syscall or something */
+  p->fd_table[fd].type = FILETYPE_FILE;
+  return true;
+}
+
+void
+remove_fd(struct process *p, int fd)
+{
+  /* Intended not to check the validity */
+  p->fd_table[fd].in_use = false;
 }

@@ -663,6 +663,18 @@ init_process (struct process *p)
   //list_push_back(, &(p->elem));
 }
 
+void
+file_lock_acquire()
+{
+  lock_acquire(&file_lock);
+}
+
+void
+file_lock_release()
+{
+  lock_release(&file_lock);
+}
+
 int
 get_available_fd(struct process *p)
 {

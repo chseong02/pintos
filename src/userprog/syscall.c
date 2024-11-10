@@ -214,7 +214,10 @@ sys_create(const char *file, unsigned initial_size)
 {
   if(file == NULL || !check_ptr_in_user_space(file))
     sys_exit(-1);
-  return filesys_create(file, initial_size);
+  file_lock_acquire();
+  bool res = filesys_create(file, initial_size);
+  file_lock_release();
+  return res;
 }
 
 bool
@@ -222,7 +225,10 @@ sys_remove(const char *file)
 {
   if(file == NULL || !check_ptr_in_user_space(file))
     sys_exit(-1);
-  return filesys_remove(file);
+  file_lock_acquire();
+  bool res = filesys_remove(file);
+  file_lock_release();
+  return res;
 }
 
 int
@@ -251,16 +257,22 @@ sys_write(int fd, const void *buffer, unsigned size)
 {
   if(!check_ptr_in_user_space(buffer))
     sys_exit(-1);
-  if(fd == 0)
+  if(!(0 <= fd && fd < OPEN_MAX))
+    return -1;
+  
+  struct process *cur = thread_current()->process_ptr;
+
+  if(!cur->fd_table[fd].in_use)
+    return -1;
+  
+  int file_type = cur->fd_table[fd].type;
+  if(file_type == FILETYPE_STDIN)
   {
-    //printf("예외\n");
+    /* Actually it also prints through console in LINUX */
     sys_exit(-1);
-  }
-    
-  else if(fd == 1)
+  } 
+  else if(file_type == FILETYPE_STDOUT)
   {
-    // printf("출력 가능\n");
-    //printf("%s",(char *)buffer);
     putbuf(buffer, size);
     return size;
   }

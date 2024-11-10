@@ -140,6 +140,7 @@ syscall_handler (struct intr_frame *f)
     case SYS_WRITE:
       get_args(f->esp, arg, 3);
       f->eax = sys_write(arg[0], (const void *)arg[1], (unsigned)arg[2]);
+      break;
     case SYS_SEEK:
       get_args(f->esp, arg, 2);
       sys_seek(arg[0], (unsigned)arg[1]);
@@ -363,20 +364,60 @@ sys_write(int fd, const void *buffer, unsigned size)
 void
 sys_seek(int fd, unsigned position)
 {
-  // TODO
-  return;
+  if(!(0 <= fd && fd < OPEN_MAX))
+    return;
+  
+  struct process *cur = thread_current()->process_ptr;
+
+  struct fd_table_entry *fd_entry = &(cur->fd_table[fd]);
+  if(!(fd_entry->in_use && 
+       fd_entry->type == FILETYPE_FILE && 
+       fd_entry->file != NULL))
+       return;
+  
+  file_lock_acquire();
+  file_seek(fd_entry->file, position);
+  file_lock_release();
 }
 
 unsigned
 sys_tell(int fd)
 {
-  // TODO
-  return -1;
+  if(!(0 <= fd && fd < OPEN_MAX))
+    return -1;
+  
+  struct process *cur = thread_current()->process_ptr;
+
+  struct fd_table_entry *fd_entry = &(cur->fd_table[fd]);
+  if(!(fd_entry->in_use && 
+       fd_entry->type == FILETYPE_FILE && 
+       fd_entry->file != NULL))
+       return -1;
+  
+  file_lock_acquire();
+  unsigned res = file_tell(fd_entry->file);
+  file_lock_release();
+
+  return res;
 }
 
 void
 sys_close(int fd)
 {
-  // TODO
-  return;
+  if(!(0 <= fd && fd < OPEN_MAX))
+    return;
+  
+  struct process *cur = thread_current()->process_ptr;
+
+  struct fd_table_entry *fd_entry = &(cur->fd_table[fd]);
+  if(fd_entry->in_use && 
+     fd_entry->type == FILETYPE_FILE && 
+     fd_entry->file != NULL)
+  {
+    file_lock_acquire();
+    file_close(fd_entry->file);
+    file_lock_release();
+  }
+
+  remove_fd(cur, fd);
 }

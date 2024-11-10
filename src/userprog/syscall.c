@@ -234,15 +234,42 @@ sys_remove(const char *file)
 int
 sys_open(const char *file)
 {
-  // TODO
-  return -1;
+  if(file == NULL || !check_ptr_in_user_space(file))
+    sys_exit(-1);
+  
+  struct process *cur = thread_current()->process_ptr;
+
+  int fd = get_available_fd(cur);
+  if(fd == -1) return -1;
+
+  file_lock_acquire();
+  struct file *target_file = filesys_open(file);
+  file_lock_release();
+  if(target_file == NULL) return -1;
+
+  /* Should verify the return value but seems okay now */
+  set_fd(cur, fd, target_file);
+  return fd;
 }
 
 int
 sys_filesize(int fd)
 {
-  // TODO
-  return 0;
+  if(!(0 <= fd && fd < OPEN_MAX))
+    return -1;
+  
+  struct process *cur = thread_current()->process_ptr;
+
+  struct fd_table_entry *fd_entry = &(cur->fd_table[fd]);
+  if(!(fd_entry->in_use && 
+       fd_entry->type == FILETYPE_FILE && 
+       fd_entry->file != NULL &&
+       check_ptr_in_user_space(fd_entry->file)))
+       return -1;
+  
+  file_lock_acquire();
+  return file_length(fd_entry->file);
+  file_lock_release();
 }
 
 int

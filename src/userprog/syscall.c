@@ -185,6 +185,7 @@ sys_exit(int status)
   struct thread *cur = thread_current();
   printf("%s: exit(%d)\n", cur->name, status);
   cur->process_ptr->exit_code = status;
+  file_close(cur->process_ptr->file_exec);
   sema_up(&(cur->process_ptr->exit_code_sema));
   thread_exit();
   NOT_REACHED();

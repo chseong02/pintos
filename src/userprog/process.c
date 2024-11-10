@@ -107,12 +107,20 @@ process_execute (const char *file_name)
     full_cmd_line_copy);
   palloc_free_page (file_name_copy);
   if (tid == TID_ERROR)
+  {
     palloc_free_page (full_cmd_line_copy);
-  
+    palloc_free_page (p);
+    return TID_ERROR;
+  }
+
   /* System call Exec Load Sync */
   sema_down(&(p->exec_load_sema));
   if (p->pid == PID_ERROR)
+  {
+    palloc_free_page (p);
     return TID_ERROR;
+  }
+    
   return tid;
 }
 
@@ -156,13 +164,13 @@ start_process (void *file_name_)
     setup_args_stack (argv, argv_len, argc, &if_.esp);
   else
     t->process_ptr->pid = PID_ERROR;
-
-  /* System call Exec Load Sync */
-  sema_up (&t->process_ptr->exec_load_sema);
   
   palloc_free_page (file_name);
   palloc_free_page (argv);
   palloc_free_page (argv_len);
+
+  /* System call Exec Load Sync */
+  sema_up (&t->process_ptr->exec_load_sema);
 
   /* If load failed, quit. */
   if (!success) 

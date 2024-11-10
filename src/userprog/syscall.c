@@ -204,7 +204,7 @@ sys_wait(pid_t pid)
       sema_down(&(p->exit_code_sema));
       list_remove(e);
       int exit_code = p->exit_code;
-      //TODO: free pcb
+      palloc_free_page(p);
       return exit_code;
     }
   }

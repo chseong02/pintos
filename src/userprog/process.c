@@ -29,26 +29,37 @@ static struct lock file_lock;
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
-static void parse_args(char *cmd_line_str, char **argv, size_t *argv_len, uint32_t *argc);
-static void setup_args_stack(char **argv, size_t *argv_len, 
-  uint32_t argc, void** esp);
+static void parse_args (char *cmd_line_str, char **argv, size_t *argv_len, 
+  uint32_t *argc);
+static void setup_args_stack (char **argv, size_t *argv_len, uint32_t argc, 
+  void **esp);
 static pid_t allocate_pid (void);
 
+/* Initialize the locks used throughout process management, 
+   initialize the process struct of the main thread, 
+   and create the connections between the main thread and process. */
 void
 process_init(void)
 {
+  struct process *p;
+  struct thread *t;
+
+  // Main Thread
+  t = thread_current();
+
   lock_init(&pid_lock);
   lock_init(&file_lock);
-  struct process *p;
+  
   p = palloc_get_page (PAL_ZERO);
   if(p == NULL)
   {
     palloc_free_page(p);
     PANIC("Main Process Init Fail");
   }
+
   init_process(p);
-  thread_current()->process_ptr = p;
-  p->tid = thread_current()->tid;
+  t->process_ptr = p;
+  p->tid = t->tid;
 }
 
 /* Starts a new thread running a user program loaded from
@@ -58,9 +69,12 @@ process_init(void)
 tid_t
 process_execute (const char *file_name) 
 {
+  /* Command: File Name + Arguments */
   char *full_cmd_line_copy;
+  /* Just File Name */
   char *file_name_copy;
   char *save_ptr;
+  struct process *p;
   tid_t tid;
 
   /* Make a copy of FILE_NAME.
@@ -77,28 +91,28 @@ process_execute (const char *file_name)
 
   strtok_r (file_name_copy, " ", &save_ptr);
   
-  /*--------------------------------------------------------*/
-  struct process *p;
+  /*-------------------------------------------------------------------------*/
+  /* Initialize Child Process Info */
   p = palloc_get_page (PAL_ZERO);
-  if(p == NULL)
+  if (p == NULL)
   {
-    palloc_free_page(p);
     return TID_ERROR;
   }
   init_process(p);
-  list_push_back(&(thread_current()->process_ptr->children),&(p->elem));
-  /*--------------------------------------------------------*/
+  list_push_back(&thread_current()->process_ptr->children, &p->elem);
+  /*-------------------------------------------------------------------------*/
 
   /* Create a new thread to execute FILE_NAME. */
-  
-  tid = thread_create_with_pcb (file_name_copy, PRI_DEFAULT, p, start_process, full_cmd_line_copy);
+  tid = thread_create_with_pcb (file_name_copy, PRI_DEFAULT, p, start_process, 
+    full_cmd_line_copy);
   palloc_free_page (file_name_copy);
   if (tid == TID_ERROR)
     palloc_free_page (full_cmd_line_copy);
+  
+  /* System call Exec Load Sync */
   sema_down(&(p->exec_load_sema));
-  if(p->pid == PID_ERROR){
+  if (p->pid == PID_ERROR)
     return TID_ERROR;
-  }
   return tid;
 }
 

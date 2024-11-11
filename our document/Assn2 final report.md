@@ -498,7 +498,7 @@ thread_create_with_pcb (const char *name, int priority, struct process* p_ptr,
 TODO: 치호 process 프로세스 파일 내 어디서 사용되는지?
 
 ### System Call - System Call Handler
-#### `syscall_handler` in `userprog/syscall`
+
 #### Virtual Memory User Space
 System call 함수들을 구현할 때 가상 메모리 위의 User Space에 있는 주소에만 읽고 쓰는 것이 가능하도록 핸들링을 해줘야 했다. Pintos 문서에는 이를 구현하기 위한 두 가지 방법이 제시되어 있는데, 이번 프로젝트에선 해당 위치가 User space인지 Kernel space인지만 검사한 뒤 User space 내에서의 잘못된 참조는 Page fault handler가 관리하도록 구현하였다.
 
@@ -605,6 +605,7 @@ get_args (int *sp, int *dest, size_t num)
 
 전달되는 인자의 수는 호출되는 System call마다 다르므로, System call 핸들러가 호출되고 어떤 함수가 호출되었는지 알아낸 뒤 위의 함수를 통해 인자를 읽어와 실행해준다.
 
+#### `syscall_handler` in `userprog/syscall`
 ```c
 static void
 syscall_handler (struct intr_frame *f) 

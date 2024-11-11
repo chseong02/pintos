@@ -317,8 +317,8 @@ struct process
 | `children`       | `struct list`                     | 자식 프로세스 리스트                        |
 | `elem`           | `stuct list_elem`                 | 자식 프로세스 리스트를 구성하기 위한 `list_elem`   |
 | `exec_load_sema` | `struct semaphore`                | 부모 프로세스에게 로드 여부를 알려주기 위한 semaphore |
-| `file_exec`      | `struct file*`                    | TODO                               |
-| `fd_table`       | `struct fd_table_entry[OPEN_MAX]` | TODO                               |
+| `file_exec`      | `struct file*`                    | 프로세스가 현재 실행중인 프로그램 파일                               |
+| `fd_table`       | `struct fd_table_entry[OPEN_MAX]` | 프로세스마다 독립적인 file descriptor의 배열                               |
 `exit_code_sema` 값이 의미하는 바
 - 0: 아직 해당 프로세스 exit 안함. (+ 부모가 exit 확인시 해당 상태 직후 바로 `process`는 할당 해제됨.)
 - 1: 해당 프로세스 exit됨. 하지만 부모는 아직 알지 못함.
@@ -387,12 +387,6 @@ init_process (struct process *p)
   list_init (&p->children);
 
   /* Initialize fd table */
-  for (size_t i = 0; i < OPEN_MAX; i++)
-  {
-    p->fd_table[i].file = NULL;
-    p->fd_table[i].in_use = false;
-    p->fd_table[i].type = FILETYPE_FILE;
-  }
   p->fd_table[0].in_use = true;
   p->fd_table[0].type = FILETYPE_STDIN;
   p->fd_table[1].in_use = true;
@@ -401,8 +395,7 @@ init_process (struct process *p)
 ```
 > 주어진 `process` 구조체 `p`를 초기화하는 함수
 
-`allocate_pid`를 통해 해당 `process`에 대한 id를 받아 `p->pid`에 넣는다. `sema_init`을 통해 `exit_code_sema`, `exec_load_sema`를 0으로 초기화한다. 또한 `children`을 `list_init`으로 초기화한다.
-//TODO: fd_table 관련
+`allocate_pid`를 통해 해당 `process`에 대한 id를 받아 `p->pid`에 넣는다. `sema_init`을 통해 `exit_code_sema`, `exec_load_sema`를 0으로 초기화한다. 또한 `children`을 `list_init`으로 초기화한다. 그 후 후술할 file descriptor table의 0번과 1번 인덱스를 사전 정의된 대로 채워 초기화해준다.
 
 해당 함수는 주어진 `p`가 올바르게 페이지를 할당 받았을 것이라고 가정하고 작동한다.
 
@@ -585,7 +578,7 @@ get_user_bytes (void *dest, const void *src, size_t num)
 
 임의 길이 write 함수는 이번 프로젝트에서 사용처가 없어 구현하지 않았다.
 
-#### System Call Arguments
+`syscall_handler` in `userprog/syscall`
 
 System call이 호출되었을 때 추가로 전달되는 인자들은 `Stack pointer + 4` 위치부터 4바이트 단위로 순서대로 배치되어있다. 이를 가져오기 위해 원하는 만큼의 인자를 읽어 가져오는 `get_args` 함수를 구현했다.
 
@@ -603,9 +596,6 @@ get_args (int *sp, int *dest, size_t num)
 }
 ```
 
-전달되는 인자의 수는 호출되는 System call마다 다르므로, System call 핸들러가 호출되고 어떤 함수가 호출되었는지 알아낸 뒤 위의 함수를 통해 인자를 읽어와 실행해준다.
-
-#### `syscall_handler` in `userprog/syscall`
 ```c
 static void
 syscall_handler (struct intr_frame *f) 
@@ -698,7 +688,7 @@ syscall_handler (struct intr_frame *f)
 
 File manipulation과 관련된 System call의 대부분이 File descriptor 시스템을 필요로 한다.
 
-#### File Descriptor
+#### File Descriptor in `userprog/process`
 File descriptor는 프로세스마다 독립적이므로 `process.h`에 모두 구현하였다.
 
 ```c
@@ -785,7 +775,7 @@ remove_fd (struct process *p, int fd)
 ```
 할당했던 fd를 해제하는 함수. 엄밀히 말하자면 할당되지 않은 fd를 해제해도 아무 일도 일어나지 않은 채 정상적으로 종료된다 (Linux 상에서 코드 테스트로 확인). 여기서는 fd 0과 1을 따로 예외처리 해주었는데, Linux 동작에서는 fd 0과 1도 `close`가 가능했지만 본 프로젝트에선 `close-stdin`과 `close-stdout` 테스트에 따라 해당 시도가 실패해야 하기 때문이다.
 
-#### File lock
+#### File lock in `userprog/process`
 ```c
 static struct lock file_lock;
 
@@ -805,7 +795,7 @@ file_lock_release (void)
 ```
 파일에 대한 Concurrency 확보를 위해 파일 관련 함수 실행 전후로 `file_lock`을 확보 및 해제해준다. 위 기능이 없을 시 `open-twice` 등의 테스트가 실패할 수 있다.
 
-#### Create
+#### `sys_create` in ``userprog/syscall`
 ```c
 static bool
 sys_create (const char *file, unsigned initial_size)
@@ -820,7 +810,7 @@ sys_create (const char *file, unsigned initial_size)
 ```
 올바른 파일 포인터인지 확인한 후 `filesys_create`의 결과를 반환해준다.
 
-#### Remove
+#### `sys_remove` in ``userprog/syscall`
 ```c
 static bool
 sys_remove(const char *file)
@@ -835,7 +825,7 @@ sys_remove(const char *file)
 ```
 올바른 파일 포인터인지 확인한 후 `filesys_remove`의 결과를 반환해준다.
 
-#### Open
+#### `sys_open` in ``userprog/syscall`
 ```c
 static int
 sys_open(const char *file)
@@ -870,7 +860,7 @@ sys_open(const char *file)
 ```
 올바른 파일 포인터인지 확인한 후, `filesys_open(file)`을 통해 해당 이름의 파일을 열고 상술한 `get_available_fd`로 사용 가능한 fd를 받아 해당 fd에 파일을 할당한다. 해당 로직 전체를 `file_lock`으로 묶어 critical section으로 만들어줘야 동시에 두 파일을 open 시도해 같은 fd값에 파일을 쓰는 오류가 일어나지 않는다.
 
-#### Filesize
+#### `sys_filesize` in ``userprog/syscall`
 ```c
 static int
 sys_filesize(int fd)
@@ -895,7 +885,7 @@ sys_filesize(int fd)
 ```
 주어진 fd에 해당하는 파일의 크기를 반환한다. 현재 프로세스의 fd table은 `thread_current()->process_ptr->fd_table`로 접근 가능하다. 현재 가리키고 있는 파일이 할당 중이고, `stdin`이나 `stdout`이 아닌 실제 파일일 경우 `file_length`를 통해 파일 길이를 반환한다. 올바르지 않은 호출일 경우 `-1`을 반환한다.
 
-#### Read
+#### `sys_read` in ``userprog/syscall`
 ```c
 static int
 sys_read(int fd, void *buffer, unsigned size)
@@ -943,7 +933,7 @@ sys_read(int fd, void *buffer, unsigned size)
 ```
 `buffer`와 fd가 올바른지를 확인한 후, 일반적인 파일일 시 `file_read`를 통해 최대 `size` 바이트만큼을 파일에서 읽어 `buffer`에 복사한다. 만약 fd가 0이었을 경우 `input_getc`와 `put_user` 함수들을 이용해 키보드 입력에서 한 바이트씩 읽어 `buffer`에 복사한다. fd가 1일 경우 Linux에서는 stdin과 똑같이 키보드 입력에서 데이터를 복사해오지만 본 프로젝트에선 `exit(-1)`을 실행하도록 하였다.
 
-#### Write
+#### `sys_write` in ``userprog/syscall`
 ```c
 static int
 sys_write(int fd, const void *buffer, unsigned size)
@@ -980,7 +970,7 @@ sys_write(int fd, const void *buffer, unsigned size)
 ```
 `sys_read`와 유사한 로직으로 구현하였고, `file_write`를 통해 최대 `size` 바이트만큼을 `buffer`에서 읽어 파일에 복사한다. fd가 1일 때는 `putbuf`를 호출하여 해당 내용을 콘솔에 출력한다. fd가 0일 경우 Linux에서는 stdout과 동일하게 콘솔에다 출력하지만 본 프로젝트에선 `exit(-1)`을 실행하도록 하였다.
 
-#### Seek
+#### `sys_seek` in ``userprog/syscall`
 ```c
 static void
 sys_seek(int fd, unsigned position)
@@ -1003,7 +993,7 @@ sys_seek(int fd, unsigned position)
 ```
 fd와 파일 검증을 마친 후 `file_seek`를 통해 현재 파일이 보고 있는 위치를 `position`으로 바꿔준다. 파일 크기보다 더 큰 위치로 이동하더라도 정상 동작으로 간주한다.
 
-#### Tell
+#### `sys_tell` in ``userprog/syscall`
 ```c
 static unsigned
 sys_tell(int fd)
@@ -1028,7 +1018,7 @@ sys_tell(int fd)
 ```
 fd와 파일 검증을 마친 후 `file_tell`을 통해 현재 파일이 보고 있는 위치를 반환한다.
 
-#### Close
+#### `sys_close` in ``userprog/syscall`
 ```c
 static void
 sys_close(int fd)

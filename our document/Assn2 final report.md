@@ -685,7 +685,7 @@ syscall_handler (struct intr_frame *f)
 
 `get_args`를 통해 `f->esp`로부터 각 시스템 콜이 필요로 하는 개수의 argument들을 얻어 `arg`에 저장한다.
 이후 각 argument 순서대로 각 시스템 콜 함수의 인수로 넣어 호출한다.
-- argument들의기본 자료형이 int로 되어 있으므로 각 함수 매개변수 자료형으로 형변환해주어야만 한다.
+- argument들의 기본 자료형이 int로 되어 있으므로 각 함수 매개변수 자료형으로 형변환해주어야만 한다.
 만약 해당 시스템 콜이 리턴 값을 필요로 한다면 시스템 콜 함수의 반환 값을 `f->eax`에 집어 넣어 시스템 콜의 리턴 값을 설정해준다.
 
 ### System Call - User Process Manipulation
@@ -693,11 +693,6 @@ syscall_handler (struct intr_frame *f)
 #### `sys_exec` in `userprog/syscall`
 #### `sys_exit` in `userprog/syscall`
 #### `sys_wait` in `userprog/syscall`
-
-### System Call - File Manipulation
-	...
-```
-
 
 ### System Call - File Manipulation
 

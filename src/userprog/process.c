@@ -253,20 +253,23 @@ setup_args_stack (char **argv, size_t *argv_len, uint32_t argc,
 int
 process_wait (tid_t child_tid) 
 {
-  if(child_tid == TID_ERROR){
+  struct thread *cur = thread_current();
+  struct list *children = &cur->process_ptr->children;
+  if (child_tid == TID_ERROR)
+  {
     return -1;
   }
-  struct thread *cur = thread_current();
-  struct list* children = &(cur->process_ptr->children);
-  for (struct list_elem *e = list_begin(children);e!=list_end(children); e=list_next(e))
+  
+  for (struct list_elem *e = list_begin (children); e != list_end (children); 
+    e = list_next (e))
   {
-    struct process *p =list_entry(e, struct process, elem);
-    if(p->tid == child_tid)
+    struct process *p = list_entry(e, struct process, elem);
+    if (p->tid == child_tid)
     {
-      sema_down(&(p->exit_code_sema));
-      list_remove(e);
+      sema_down (&p->exit_code_sema);
+      list_remove (e);
       int exit_code = p->exit_code;
-      //TODO: free pcb
+      palloc_free_page (p);
       return exit_code;
     }
   }
@@ -623,7 +626,6 @@ setup_stack (void **esp)
     {
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
       if (success)
-        //TODO: 핀토스 문서 추천의 임시 구현
         *esp = PHYS_BASE;
       else
         palloc_free_page (kpage);
@@ -671,13 +673,14 @@ void
 init_process (struct process *p)
 {
   memset (p, 0, sizeof *p);
-  p->pid = allocate_pid();
-  sema_init(&(p->exit_code_sema), 0);
-  sema_init(&(p->exec_load_sema), 0);
-  list_init(&(p->children));
+  p->pid = allocate_pid ();
+  sema_init (&p->exit_code_sema, 0);
+  sema_init (&p->exec_load_sema, 0);
+  list_init (&p->children);
 
   /* Initialize fd table */
-  for(size_t i = 0; i < OPEN_MAX; i++){
+  for (size_t i = 0; i < OPEN_MAX; i++)
+  {
     p->fd_table[i].file = NULL;
     p->fd_table[i].in_use = false;
     p->fd_table[i].type = FILETYPE_FILE;
@@ -686,37 +689,37 @@ init_process (struct process *p)
   p->fd_table[0].type = FILETYPE_STDIN;
   p->fd_table[1].in_use = true;
   p->fd_table[1].type = FILETYPE_STDOUT;
-  //TODO: current process
-  //list_push_back(, &(p->elem));
 }
 
 void
-file_lock_acquire()
+file_lock_acquire (void)
 {
-  lock_acquire(&file_lock);
+  lock_acquire (&file_lock);
 }
 
 void
-file_lock_release()
+file_lock_release (void)
 {
-  lock_release(&file_lock);
+  lock_release (&file_lock);
 }
 
 int
-get_available_fd(struct process *p)
+get_available_fd (struct process *p)
 {
-  for(size_t i = 0; i < OPEN_MAX; i++){
-    if(!p->fd_table[i].in_use) return i;
+  for (size_t i = 0; i < OPEN_MAX; i++)
+  {
+    if (!p->fd_table[i].in_use)
+      return i;
   }
   /* No more available fd in the table */
   return -1;
 }
 
 bool
-set_fd(struct process *p, int fd, struct file *_file)
+set_fd (struct process *p, int fd, struct file *_file)
 {
-  if(!(0 <= fd && fd < OPEN_MAX)) return false;
-  if(p->fd_table[fd].in_use) return false;
+  if (!(0 <= fd && fd < OPEN_MAX)) return false;
+  if (p->fd_table[fd].in_use) return false;
   p->fd_table[fd].file = _file;
   p->fd_table[fd].in_use = true;
   /* Currently there's no way to open STDIN or STDOUT
@@ -726,7 +729,7 @@ set_fd(struct process *p, int fd, struct file *_file)
 }
 
 void
-remove_fd(struct process *p, int fd)
+remove_fd (struct process *p, int fd)
 {
   if(!(2 <= fd && fd < OPEN_MAX)) return;
   /* Intended not to check the validity */

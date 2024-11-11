@@ -87,6 +87,7 @@ syscall_init (void)
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
 }
 
+/* Parse NUM arguments from sp + 4 to dest. */
 static void
 get_args (int *sp, int *dest, size_t num)
 {

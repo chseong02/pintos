@@ -710,18 +710,22 @@ init_process (struct process *p)
   p->fd_table[1].type = FILETYPE_STDOUT;
 }
 
+/* Wrapper function for file_lock acquire */
 void
 file_lock_acquire (void)
 {
   lock_acquire (&file_lock);
 }
 
+/* Wrapper function for file_lock release */
 void
 file_lock_release (void)
 {
   lock_release (&file_lock);
 }
 
+/* Returns minimum available fd, or else -1 if
+   no fd is available*/
 int
 get_available_fd (struct process *p)
 {
@@ -734,6 +738,8 @@ get_available_fd (struct process *p)
   return -1;
 }
 
+/* Allocates the file descriptor FD on process P,
+   points file _FILE */
 bool
 set_fd (struct process *p, int fd, struct file *_file)
 {
@@ -747,6 +753,7 @@ set_fd (struct process *p, int fd, struct file *_file)
   return true;
 }
 
+/* Free the file descriptor FD on process P */
 void
 remove_fd (struct process *p, int fd)
 {

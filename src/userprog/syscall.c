@@ -93,8 +93,8 @@ get_args (int *sp, int *dest, size_t num)
   for(size_t i = 0; i < num; i++)
   {
     int *src = sp + i + 1;
-    if(!check_ptr_in_user_space (src)) sys_exit (-1);
-    if(!get_user_bytes (dest + i, src, 4)) sys_exit (-1);
+    if (!check_ptr_in_user_space (src)) sys_exit (-1);
+    if (!get_user_bytes (dest + i, src, 4)) sys_exit (-1);
   }
 }
 

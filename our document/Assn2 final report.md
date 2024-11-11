@@ -1058,6 +1058,61 @@ sys_close(int fd)
 ```
 fd와 파일 검증을 마친 후 `file_close`를 통해 파일을 닫아준다.
 
+### Denying Writes to Executables
+```c
+struct process
+{
+  ...
+  struct file *file_exec;
+  ...
+};
+```
+PCB에 현재 실행중인 프로그램 파일을 나타내는 포인터 변수를 추가해준다.
+
+```c
+bool
+load (const char *file_name, void (**eip) (void), void **esp) 
+{
+  ...
+
+  /* Open executable file. */
+  file_lock_acquire();
+  file = filesys_open (file_name);
+
+  ...
+
+  success = true;
+  file_deny_write(file);
+  t->process_ptr->file_exec = file;
+
+ done:
+  /* We arrive here whether the load is successful or not. */
+  if(!success) file_close(file);
+  file_lock_release();
+  return success;
+}
+```
+프로세스에 실행 파일을 load할 때, 모든 작업이 성공하였을 경우 `file_deny_write`를 호출하여 해당 프로그램 파일이 수정되는 것을 막는다. 또한 기본 구현에서 load가 끝날 때 프로그램 파일을 바로 `close`해버리는 동작을 수정하여 계속 열어두도록 고쳤다. 해당 로직을 `file_lock`을 통해 묶어주는 과정 역시 필요하다.
+
+```c
+void
+sys_exit (int status)
+{
+  ...
+  file_close (cur->process_ptr->file_exec);
+  for (size_t i = 2; i < OPEN_MAX; i++)
+  {
+    if(cur->process_ptr->fd_table[i].in_use)
+    {
+      file_close (cur->process_ptr->fd_table[i].file);
+      remove_fd (cur->process_ptr, i);
+    }
+  }
+  ...
+}
+```
+Deny 해제는 프로세스가 종료되고 `exit`을 호출하는 도중 `file_close`를 통해 현재 실행중이었던 프로그램 파일을 close해주면 완료된다. (내부적으로 `file_allow_write` 호출)
+
 ## 발전한 점
 ㅇㄹ
 

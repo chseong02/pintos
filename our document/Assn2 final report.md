@@ -277,11 +277,328 @@ process_execute (const char *file_name)
 
 위의 작업들을 통해 Argument Passing을 구현하여 올바르게 파일을 오픈하여 유저 프로그램을 수행하고 유저 프로그램 실행시 명령어의 argument들을 올바르게 넘겨줄 수 있게 되었다.
 
-### System Call 기반
+### System Call - Basement
+TODO: 치호 디자인 레포트와 뭐가 다른지
 
+#### `struct process` in `userprog/process`
+`process` 구조체는 Process Control Block을 표현하는 구조체로 스레드의 정보를 표현하고 스레드를 관리하는데 사용하는 `struct thread`와 동일한 역할을 프로세스 관리 및 시스템 콜에서 수행한다.
+`process`는 `exec`, `wait`, `exit`과 같은 프로세스에 직접 연관 있는 시스템 콜 및 프로세스 간에 관여하는 시스템 콜을 쉽게 통제하고 프로세스별 file system call 사용 현황 관리 및 관련 synchronization 문제들을 쉽게 해결하기 위해 존재한다.
 
-### System Call - PCB
+`process`는 프로세스 하나에 일대일 대응되는 구조체이다. 또한 Pintos에서는 현재 프로세스는 스레드 하나만을 가진다.
+
+```c
+// in userprog/process.h
+typedef int pid_t;
+```
+`tid_t`와 유사하게 프로세스의 identifier 자료형이다. 
+
+```c
+struct process
+{
+  pid_t pid;
+  tid_t tid;
+  int exit_code;
+  struct semaphore exit_code_sema;
+  struct list children;
+  struct list_elem elem;
+  struct semaphore exec_load_sema;
+  struct file *file_exec;
+  struct fd_table_entry fd_table[OPEN_MAX];
+};
+```
+`struct process`의 각 멤벼 변수는 다음과 같다.
+
+| 멤버 변수 이름         | 자료형                               | 설명                                 |
+| ---------------- | --------------------------------- | ---------------------------------- |
+| `pid`            | `pid_t`                           | 프로세스를 구별하는 Identifier              |
+| `tid`            | `tid_t`                           | 해당 프로세스를 실행 중인 스레드의 id             |
+| `exit_code`      | `int`                             | 프로세스 exit시 exit_code               |
+| `exit_code_sema` | `struct semaphore`                | 부모 프로세스의 wait을 위해 사용되는 semaphore   |
+| `children`       | `struct list`                     | 자식 프로세스 리스트                        |
+| `elem`           | `stuct list_elem`                 | 자식 프로세스 리스트를 구성하기 위한 `list_elem`   |
+| `exec_load_sema` | `struct semaphore`                | 부모 프로세스에게 로드 여부를 알려주기 위한 semaphore |
+| `file_exec`      | `struct file*`                    | TODO                               |
+| `fd_table`       | `struct fd_table_entry[OPEN_MAX]` | TODO                               |
+`exit_code_sema` 값이 의미하는 바
+- 0: 아직 해당 프로세스 exit 안함. (+ 부모가 exit 확인시 해당 상태 직후 바로 `process`는 할당 해제됨.)
+- 1: 해당 프로세스 exit됨. 하지만 부모는 아직 알지 못함.
+
+`exec_load_sema` 값이 의미하는 바
+- 0: 아직 해당 프로세스 load 완료 안 됨. load 완료 후 부모가 확인함.
+- 1: 해당 프로세스 load 완료 후 부모가 알기 전의 상태
+
+####  `process`를 위한 `struct thread` 변화
+```c
+struct thread
+  {
+    /* Owned by thread.c. */
+    tid_t tid;                          /* Thread identifier. */
+    
+    ...
+    
+#ifdef USERPROG
+    /* Owned by userprog/process.c. */
+    uint32_t *pagedir;                  /* Page directory. */
+    struct process* process_ptr;
+#endif
+
+    ...
+  };
+```
+스레드 정보를 나타내는 `struct thread` 멤버에 `struct process* process_ptr`를 추가한다. 
+이는 해당 스레드의 프로세스가 무엇인지 표현하는 변수로 스레드의 프로세스의 `struct process`를 가리키는 포인터이다. 
+구조체 자체를 넣는 것이 아닌 포인터를 사용한 이유는 `struct thread`와 `struct process`의 lifecycle이 다르기 때문이다.
+- exit code 전달을 위해 `wait`, `exit` 등에서 `thread`는 free지만 `process`는 존재하는 상황들 발생 가능.
+
+#### `allocate_pid` in `userprog/process.c`
+```c
+static struct lock pid_lock;
+```
+프로세스 identifier인 pid가 unique하게 보장하기 위해 프로세스 id 생성 함수인 `allocate_pid`에서 사용하는 lock
+
+```c
+static pid_t
+allocate_pid (void)
+{
+  static pid_t next_pid = 1;
+  pid_t pid;
+
+  lock_acquire (&pid_lock);
+  pid = next_pid++;
+  lock_release (&pid_lock);
+
+  return pid;
+}
+```
+> 각 프로세스에게 unique한 id를 생성해 반환하는 함수
+
+원리는 `allocate_tid`와 완전히 동일하다. `next_pid`를 반환하며 1부터 1씩 증가시킨다. 
+해당 함수 실행시 항상 `next_pid`는 1씩 증가하며 `next_pid` 변경 및 pid 할당은 `pid_lock`에 의해 한 스레드만 수행할 수 있으므로 id가 unique함이 보장된다.
+
+#### `init_process` in `userprog/process.c`
+```c
+void
+init_process (struct process *p)
+{
+  memset (p, 0, sizeof *p);
+  p->pid = allocate_pid ();
+  sema_init (&p->exit_code_sema, 0);
+  sema_init (&p->exec_load_sema, 0);
+  list_init (&p->children);
+
+  /* Initialize fd table */
+  for (size_t i = 0; i < OPEN_MAX; i++)
+  {
+    p->fd_table[i].file = NULL;
+    p->fd_table[i].in_use = false;
+    p->fd_table[i].type = FILETYPE_FILE;
+  }
+  p->fd_table[0].in_use = true;
+  p->fd_table[0].type = FILETYPE_STDIN;
+  p->fd_table[1].in_use = true;
+  p->fd_table[1].type = FILETYPE_STDOUT;
+}
+```
+> 주어진 `process` 구조체 `p`를 초기화하는 함수
+
+`allocate_pid`를 통해 해당 `process`에 대한 id를 받아 `p->pid`에 넣는다. `sema_init`을 통해 `exit_code_sema`, `exec_load_sema`를 0으로 초기화한다. 또한 `children`을 `list_init`으로 초기화한다.
+//TODO: fd_table 관련
+
+해당 함수는 주어진 `p`가 올바르게 페이지를 할당 받았을 것이라고 가정하고 작동한다.
+
+#### `process_init` in `userprog/process.c`
+```c
+void
+process_init(void)
+{
+  struct process *p;
+  struct thread *t;
+
+  // Main Thread
+  t = thread_current();
+
+  lock_init(&pid_lock);
+  lock_init(&file_lock);
+  
+  p = palloc_get_page (PAL_ZERO);
+  if(p == NULL)
+  {
+    palloc_free_page(p);
+    PANIC("Main Process Init Fail");
+  }
+
+  init_process(p);
+  t->process_ptr = p;
+  p->tid = t->tid;
+}
+```
+> `process` 시스템 초기화 및 Main Process의 `process`를 초기화하는 함수
+
+`thread_current()` 결과가 메인 프로세스이기를 기대한다.
+`lock_init`을 이용하여 Process id 할당에 사용되는 `pid_lock`, 각종 파일 시스템 콜 critical section에 사용되는 `file_lock`을 초기화한다.
+현재 스레드(프로세스)(Main 스레드/프로세스)의 `process` 구조체를 위한 공간을 `palloc_get_page`로 할당 받는다. 만약 할당 실패시 패닉한다. 메인 프로세스의 프로세스 정보를 초기화하지 못하면 다른 작업들을 정상적으로 수행할 수 없기 때문이다. 
+
+할당에 성공하면 `init_process`를 통해 `process` 구조체를 초기화한다. 또한 현재 스레드 `thread`의 `process_ptr`이 새로 생성한 `process` 구조체를 가르키도록 한다. 새로 생성한 `process` `p`의 `tid`를 현재 스레드의 `tid`로 설정하여 스레드, 프로세스간 매핑 관계를 설정한다.
+
+####  `thread_create_with_pcb` in `threads/thread`
+```c
+tid_t
+thread_create_with_pcb (const char *name, int priority, struct process* p_ptr,
+               thread_func *function, void *aux) 
+{
+  struct thread *t;
+  struct kernel_thread_frame *kf;
+  struct switch_entry_frame *ef;
+  struct switch_threads_frame *sf;
+  tid_t tid;
+
+  ASSERT (function != NULL);
+
+  /* Allocate thread. */
+  t = palloc_get_page (PAL_ZERO);
+  if (t == NULL)
+    return TID_ERROR;
+
+  /* Initialize thread. */
+  init_thread (t, name, priority);
+  tid = t->tid = allocate_tid ();
+
+  t->process_ptr = p_ptr;
+  t->process_ptr->tid=tid;
+
+  /* Stack frame for kernel_thread(). */
+  kf = alloc_frame (t, sizeof *kf);
+  kf->eip = NULL;
+  kf->function = function;
+  kf->aux = aux;
+
+  /* Stack frame for switch_entry(). */
+  ef = alloc_frame (t, sizeof *ef);
+  ef->eip = (void (*) (void)) kernel_thread;
+
+  /* Stack frame for switch_threads(). */
+  sf = alloc_frame (t, sizeof *sf);
+  sf->eip = switch_entry;
+  sf->ebp = 0;
+
+  /* Add to run queue. */
+  thread_unblock (t);
+
+  return tid;
+}
+```
+> `process` 연관 정보 설정 기능을 추가한 `thread_create` 확장 함수로 user process thread 생성시 사용한다.
+
+기존 스레드 생성 함수인 `thread_create`에 다음 기능만을 추가한 함수이다.
+- 매개변수로 `struct process* p_ptr`을 추가로 받는다. `p_ptr`은 해당 스레드의 프로세스의 `process` 구조체 주소이다.
+	- 이를 통해 해당 스레드의 프로세스의 `process` 구조체의 변수들을 보거나 변경할 수 있다.
+- `t->process_ptr = p_ptr;`를 통해 새로 생성한 `thread`의 `process_ptr`을 넘겨준 `p_ptr`로 설정하게 한다. 즉 `p_ptr`의 `process`와 새로 생성한 스레드가 관계를 형성하는 것이다.
+- `t->process_ptr->tid=tid;`를 통해 해당 스레드와 연결된 `process`의 `tid`를 현재 스레드의 `tid`로 설정하여 양방향 관계를 형성한다.
+
+TODO: 치호 process 프로세스 파일 내 어디서 사용되는지?
+
+### System Call - System Call Handler
+#### `syscall_handler` in `userprog/syscall`
+```c
+static void
+syscall_handler (struct intr_frame *f) 
+{
+  int arg[4];
+  if (!check_ptr_in_user_space (f->esp))
+    sys_exit (-1);
+  switch(*(uint32_t *) (f->esp))
+  {
+    case SYS_HALT:
+      sys_halt ();
+      break;
+    case SYS_EXIT:
+      get_args (f->esp, arg, 1);
+      sys_exit (arg[0]);
+      break;
+    case SYS_EXEC:
+      get_args (f->esp, arg, 1);
+      f->eax = sys_exec ((const char *) arg[0]);
+      break;
+    case SYS_WAIT:
+      get_args (f->esp, arg, 1);
+      f->eax = sys_wait ((pid_t) arg[0]);
+      break;
+    case SYS_CREATE:
+      get_args (f->esp, arg, 2);
+      f->eax = sys_create ((const char *) arg[0], (unsigned) arg[1]);
+      break;
+    case SYS_REMOVE:
+      get_args (f->esp, arg, 1);
+      f->eax = sys_remove ((const char *) arg[0]);
+      break;
+    case SYS_OPEN:
+      get_args (f->esp, arg, 1);
+      f->eax = sys_open ((const char *) arg[0]);
+      break;
+    case SYS_FILESIZE:
+      get_args (f->esp, arg, 1);
+      f->eax = sys_filesize (arg[0]);
+      break;
+    case SYS_READ:
+      get_args (f->esp, arg, 3);
+      f->eax = sys_read (arg[0], (void *) arg[1], (unsigned) arg[2]);
+      break;
+    case SYS_WRITE:
+      get_args (f->esp, arg, 3);
+      f->eax = sys_write(arg[0], (const void *) arg[1], (unsigned) arg[2]);
+      break;
+    case SYS_SEEK:
+      get_args (f->esp, arg, 2);
+      sys_seek (arg[0], (unsigned) arg[1]);
+      break;
+    case SYS_TELL:
+      get_args (f->esp, arg, 1);
+      f->eax = sys_tell (arg[0]);
+      break;
+    case SYS_CLOSE:
+      get_args (f->esp, arg, 1);
+      sys_close (arg[0]);
+      break;
+    default:
+      sys_exit (-1);
+  }
+}
+
+```
+> System call에 대한 interrupt handler 함수로 등록된 함수로 어떤 system call인지 판별 후 각 system call 맞는 함수를 호출 후 리턴 값을 설정하는 함수이다.
+
+이번 프로젝트에 구현해야 할 시스템 콜은 모두 다음과 같다.  
+- `SYS_HALT`, `SYS_EXIT`, `SYS_EXEC`, `SYS_WAIT`, `SYS_CREATE`, `SYS_REMOVE`, `SYS_OPEN`, `SYS_FILESIZE`, `SYS_READ`, `SYS_WRITE`, `SYS_SEEK`, `SYS_TELL`, `SYS_CLOSE`
+시스템 콜의 argument 주소를 저장할 길이 4의 배열 `int arg[4]`를 선언한다. 
+- 다음 시스템 콜들은 호출 함수의 argument 개수가 4개를 넘지 않는다. 
+인수로 받은 interrupt frame `f`의 `esp`가 올바른 주소인지(user space의 주소인지) `check_ptr_in_user_space`를 통해 검증 후 올바르지 않다면 `sys_exit (-1)`을 통해 해당 프로세스를 종료한다.
+- OS는 유저를 믿으면 안되고 유저가 보낸 값들은 우선 의심해야 한다.
+`f->esp`에 담긴 값은 system call number로 해당 값을 기준으로 호출할 함수를 결정한다.
+
+`get_args`를 통해 `f->esp`로부터 각 시스템 콜이 필요로 하는 개수의 argument들을 얻어 `arg`에 저장한다.
+이후 각 argument 순서대로 각 시스템 콜 함수의 인수로 넣어 호출한다.
+- argument들의기본 자료형이 int로 되어 있으므로 각 함수 매개변수 자료형으로 형변환해주어야만 한다.
+만약 해당 시스템 콜이 리턴 값을 필요로 한다면 시스템 콜 함수의 반환 값을 `f->eax`에 집어 넣어 시스템 콜의 리턴 값을 설정해준다.
+
+### System Call - User Process Manipulation
+#### `sys_halt` in `userprog/syscall`
+#### `sys_exec` in `userprog/syscall`
+#### `sys_exit` in `userprog/syscall`
+#### `sys_wait` in `userprog/syscall`
+
+### System Call - File Manipulation
+
 
 ## 발전한 점
+ㅇㄹ
+
 ## 한계
+ㅇㄹ
+
 ## 배운 점
+커맨드 라인의 작동 방식
+포인터 활용 
+Virtual Memory 작동 방식, User pool과 Kernel Pool
+메모리 누수 관리의 어려움.
+좀비 프로세스
+

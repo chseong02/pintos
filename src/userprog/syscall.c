@@ -12,7 +12,21 @@ static void syscall_handler (struct intr_frame *);
 static int get_user (const uint8_t *uaddr);
 static bool put_user (uint8_t *udst, uint8_t byte);
 
-static pid_t sys_exec(const char *cmd_line);
+static void get_args (int *sp, int *dest, size_t num);
+static bool get_user_bytes (void *dest, const void *src, size_t num);
+
+static void sys_halt ();
+static pid_t sys_exec (const char *cmd_line);
+static int sys_wait (pid_t pid);
+static bool sys_create (const char *file, unsigned initial_size);
+static bool sys_remove (const char *file);
+static int sys_open (const char *file);
+static int sys_filesize (int fd);
+static int sys_read (int fd, void *buffer, unsigned size);
+static int sys_write (int fd, const void *buffer, unsigned size);
+static void sys_seek (int fd, unsigned position);
+static unsigned sys_tell (int fd);
+static void sys_close (int fd);
 
  	
 /* Reads a byte at user virtual address UADDR.
@@ -43,29 +57,26 @@ put_user (uint8_t *udst, uint8_t byte)
 /* Reads NUM bytes at user address SRC, stores at DEST.
    Note that DEST is not a vmem address.
    Returns true if every byte copies are successful. */
-bool
-get_user_bytes(void *dest, const void *src, size_t num)
+static bool
+get_user_bytes (void *dest, const void *src, size_t num)
 {
   uint8_t *_dest = dest;
   const uint8_t *_src = src;
-  // printf("src: %p, dest: %p\n", _src, _dest);
-  for(size_t i = 0; i < num; i++)
+  for (size_t i = 0; i < num; i++)
   {
-    if(!check_ptr_in_user_space(_src)) return false;
-    int res = get_user(_src);
-    if(res == -1) return false;
-    // printf("%02hhx ", res);
-    *_dest = (uint8_t)res;
+    if (!check_ptr_in_user_space (_src)) return false;
+    int res = get_user (_src);
+    if (res == -1) return false;
+    *_dest = (uint8_t) res;
     _dest++;
     _src++;
   }
-  // printf("\n");
   return true;
 }
 
 /* Only checks whether its in the user space */
 bool
-check_ptr_in_user_space(const void *ptr)
+check_ptr_in_user_space (const void *ptr)
 {
   return ptr < PHYS_BASE;
 }
@@ -76,161 +87,155 @@ syscall_init (void)
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
 }
 
-void
-get_args(int *sp, int *dest, size_t num)
+static void
+get_args (int *sp, int *dest, size_t num)
 {
   for(size_t i = 0; i < num; i++)
   {
     int *src = sp + i + 1;
-    if(!check_ptr_in_user_space(src)) sys_exit(-1);
-    if(!get_user_bytes(dest + i, src, 4)) sys_exit(-1);
-    // dest[i] = *src;
-    // printf("Arg %u: %x\n", i, dest[i]);
+    if(!check_ptr_in_user_space (src)) sys_exit (-1);
+    if(!get_user_bytes (dest + i, src, 4)) sys_exit (-1);
   }
-  // printf("ESP: %p\n", sp);
 }
 
 static void
 syscall_handler (struct intr_frame *f) 
 {
-  //printf ("system call!\n");
-  
   int arg[4];
-  // hex_dump(0,f->esp,100,true);
-  if(!check_ptr_in_user_space(f->esp))
-    sys_exit(-1);
-
-  //printf("시스템콜 디버깅!\n");
-  switch(*(uint32_t *)(f->esp)) {
+  if (!check_ptr_in_user_space (f->esp))
+    sys_exit (-1);
+  switch(*(uint32_t *) (f->esp))
+  {
     case SYS_HALT:
-      sys_halt();
+      sys_halt ();
       break;
     case SYS_EXIT:
-      get_args(f->esp, arg, 1);
-      sys_exit(arg[0]);
+      get_args (f->esp, arg, 1);
+      sys_exit (arg[0]);
       break;
     case SYS_EXEC:
-      get_args(f->esp, arg, 1);
-      f->eax = sys_exec((const char *)arg[0]);
+      get_args (f->esp, arg, 1);
+      f->eax = sys_exec ((const char *) arg[0]);
       break;
     case SYS_WAIT:
-      get_args(f->esp, arg, 1);
-      f->eax = sys_wait((pid_t)arg[0]);
+      get_args (f->esp, arg, 1);
+      f->eax = sys_wait ((pid_t) arg[0]);
       break;
     case SYS_CREATE:
-      get_args(f->esp, arg, 2);
-      f->eax = sys_create((const char *)arg[0], (unsigned)arg[1]);
+      get_args (f->esp, arg, 2);
+      f->eax = sys_create ((const char *) arg[0], (unsigned) arg[1]);
       break;
     case SYS_REMOVE:
-      get_args(f->esp, arg, 1);
-      f->eax = sys_remove((const char *)arg[0]);
+      get_args (f->esp, arg, 1);
+      f->eax = sys_remove ((const char *) arg[0]);
       break;
     case SYS_OPEN:
-      get_args(f->esp, arg, 1);
-      f->eax = sys_open((const char *)arg[0]);
+      get_args (f->esp, arg, 1);
+      f->eax = sys_open ((const char *) arg[0]);
       break;
     case SYS_FILESIZE:
-      get_args(f->esp, arg, 1);
-      f->eax = sys_filesize(arg[0]);
+      get_args (f->esp, arg, 1);
+      f->eax = sys_filesize (arg[0]);
       break;
     case SYS_READ:
-      get_args(f->esp, arg, 3);
-      f->eax = sys_read(arg[0], (void *)arg[1], (unsigned)arg[2]);
+      get_args (f->esp, arg, 3);
+      f->eax = sys_read (arg[0], (void *) arg[1], (unsigned) arg[2]);
       break;
     case SYS_WRITE:
-      get_args(f->esp, arg, 3);
-      f->eax = sys_write(arg[0], (const void *)arg[1], (unsigned)arg[2]);
+      get_args (f->esp, arg, 3);
+      f->eax = sys_write(arg[0], (const void *) arg[1], (unsigned) arg[2]);
       break;
     case SYS_SEEK:
-      get_args(f->esp, arg, 2);
-      sys_seek(arg[0], (unsigned)arg[1]);
+      get_args (f->esp, arg, 2);
+      sys_seek (arg[0], (unsigned) arg[1]);
       break;
     case SYS_TELL:
-      get_args(f->esp, arg, 1);
-      f->eax = sys_tell(arg[0]);
+      get_args (f->esp, arg, 1);
+      f->eax = sys_tell (arg[0]);
       break;
     case SYS_CLOSE:
-      get_args(f->esp, arg, 1);
-      sys_close(arg[0]);
+      get_args (f->esp, arg, 1);
+      sys_close (arg[0]);
       break;
     default:
-      sys_exit(-1);
+      sys_exit (-1);
   }
-  
-  //TODO: 구현 완료시 exit 삭제
-  //thread_exit ();
 }
 
-void
-sys_halt()
+static void
+sys_halt ()
 {
-  shutdown_power_off();
-  NOT_REACHED();
+  shutdown_power_off ();
+  NOT_REACHED ();
 }
 
 static pid_t
-sys_exec(const char *cmd_line)
+sys_exec (const char *cmd_line)
 {
-  tid_t tid = process_execute(cmd_line);
-  if(tid == TID_ERROR)
+  struct list_elem *elem;
+  struct process *p;
+  tid_t tid = process_execute (cmd_line);
+  if (tid == TID_ERROR)
     return TID_ERROR;
-  struct list_elem *elem= list_back(&(thread_current()->process_ptr->children));
-  struct process *p= list_entry(elem,struct process, elem);
+  elem = list_back (&thread_current ()->process_ptr->children);
+  p = list_entry (elem, struct process, elem);
   return p->pid;
 }
 
 void
-sys_exit(int status)
+sys_exit (int status)
 {
-  struct thread *cur = thread_current();
-  printf("%s: exit(%d)\n", cur->name, status);
+  struct thread *cur = thread_current ();
+  printf ("%s: exit(%d)\n", cur->name, status);
   cur->process_ptr->exit_code = status;
 
-  file_close(cur->process_ptr->file_exec);
-  for(size_t i = 2; i < OPEN_MAX; i++){
+  file_close (cur->process_ptr->file_exec);
+  for (size_t i = 2; i < OPEN_MAX; i++)
+  {
     if(cur->process_ptr->fd_table[i].in_use)
     {
-      file_close(cur->process_ptr->fd_table[i].file);
-      remove_fd(cur->process_ptr, i);
+      file_close (cur->process_ptr->fd_table[i].file);
+      remove_fd (cur->process_ptr, i);
     }
   }
-  sema_up(&(cur->process_ptr->exit_code_sema));
-  thread_exit();
-  NOT_REACHED();
+  sema_up (&(cur->process_ptr->exit_code_sema));
+  thread_exit ();
+  NOT_REACHED ();
 }
 
-int
-sys_wait(pid_t pid)
+static int
+sys_wait (pid_t pid)
 {
   struct thread *cur = thread_current();
-  struct list* children = &(cur->process_ptr->children);
-  for (struct list_elem *e = list_begin(children);e!=list_end(children); e=list_next(e))
+  struct list* children = &cur->process_ptr->children;
+  for (struct list_elem *e = list_begin (children); e != list_end (children); 
+    e = list_next (e))
   {
-    struct process *p =list_entry(e, struct process, elem);
-    if(p->pid == pid)
+    struct process *p = list_entry (e, struct process, elem);
+    if (p->pid == pid)
     {
-      sema_down(&(p->exit_code_sema));
-      list_remove(e);
+      sema_down (&p->exit_code_sema);
+      list_remove (e);
       int exit_code = p->exit_code;
-      palloc_free_page(p);
+      palloc_free_page (p);
       return exit_code;
     }
   }
   return -1;
 }
 
-bool
-sys_create(const char *file, unsigned initial_size)
+static bool
+sys_create (const char *file, unsigned initial_size)
 {
-  if(file == NULL || !check_ptr_in_user_space(file))
-    sys_exit(-1);
-  file_lock_acquire();
-  bool res = filesys_create(file, initial_size);
-  file_lock_release();
+  if (file == NULL || !check_ptr_in_user_space (file))
+    sys_exit (-1);
+  file_lock_acquire ();
+  bool res = filesys_create (file, initial_size);
+  file_lock_release ();
   return res;
 }
 
-bool
+static bool
 sys_remove(const char *file)
 {
   if(file == NULL || !check_ptr_in_user_space(file))
@@ -241,7 +246,7 @@ sys_remove(const char *file)
   return res;
 }
 
-int
+static int
 sys_open(const char *file)
 {
   if(file == NULL || !check_ptr_in_user_space(file))
@@ -272,7 +277,7 @@ sys_open(const char *file)
   return fd;
 }
 
-int
+static int
 sys_filesize(int fd)
 {
   if(!(0 <= fd && fd < OPEN_MAX))
@@ -293,7 +298,7 @@ sys_filesize(int fd)
   return res;
 }
 
-int
+static int
 sys_read(int fd, void *buffer, unsigned size)
 {
   if(!check_ptr_in_user_space(buffer))
@@ -337,7 +342,7 @@ sys_read(int fd, void *buffer, unsigned size)
   }
 }
 
-int
+static int
 sys_write(int fd, const void *buffer, unsigned size)
 {
   if(!check_ptr_in_user_space(buffer))
@@ -370,7 +375,7 @@ sys_write(int fd, const void *buffer, unsigned size)
   }
 }
 
-void
+static void
 sys_seek(int fd, unsigned position)
 {
   if(!(0 <= fd && fd < OPEN_MAX))
@@ -389,7 +394,7 @@ sys_seek(int fd, unsigned position)
   file_lock_release();
 }
 
-unsigned
+static unsigned
 sys_tell(int fd)
 {
   if(!(0 <= fd && fd < OPEN_MAX))
@@ -410,7 +415,7 @@ sys_tell(int fd)
   return res;
 }
 
-void
+static void
 sys_close(int fd)
 {
   if(!(0 <= fd && fd < OPEN_MAX))

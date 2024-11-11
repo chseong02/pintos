@@ -31,7 +31,6 @@ struct process
   tid_t tid;
   int exit_code;
   struct semaphore exit_code_sema;
-  //TODO: FDT
   struct list children;
   struct list_elem elem;
   struct semaphore exec_load_sema;

@@ -704,12 +704,6 @@ init_process (struct process *p)
   list_init (&p->children);
 
   /* Initialize fd table */
-  for (size_t i = 0; i < OPEN_MAX; i++)
-  {
-    p->fd_table[i].file = NULL;
-    p->fd_table[i].in_use = false;
-    p->fd_table[i].type = FILETYPE_FILE;
-  }
   p->fd_table[0].in_use = true;
   p->fd_table[0].type = FILETYPE_STDIN;
   p->fd_table[1].in_use = true;

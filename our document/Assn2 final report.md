@@ -415,6 +415,362 @@ syscall_handler (struct intr_frame *f)
 
 ### System Call - File Manipulation
 
+File manipulation과 관련된 System call의 대부분이 File descriptor 시스템을 필요로 한다.
+
+#### File Descriptor
+File descriptor는 프로세스마다 독립적이므로 `process.h`에 모두 구현하였다.
+
+```c
+struct fd_table_entry
+{
+  struct file *file;
+  bool in_use;
+  int type;
+};
+
+#define FILETYPE_FILE 0
+#define FILETYPE_STDIN 1
+#define FILETYPE_STDOUT 2
+```
+각 File descriptor 구성요소를 나타내는 구조체. 각 fd가 어떤 파일을 가리키는지 나타내는 `file` 포인터, 현재 점유중인지를 나타내는 `in_use` 플래그, 그리고 design에서 추가된 사항으로 해당 fd가 가리키고 있는 대상의 타입을 나타내는 `type`로 이루어져 있다.
+
+위와 같이 `type`을 추가한 이유는 Linux상에서 실제 System call을 통해 테스트한 동작 방식을 구현하기 위함인데, 테스트 결과 Linux에서는 사전 정의되어있는 `0~2`번 fd도 닫을 수 있었고, 해당 fd에 새로운 파일을 열 경우 fd가 `0~2`임에도 불구하고 일반적인 파일과 같이 동작하였다. 때문에 본 프로젝트에서도 fd `0~1`을 예외처리해주는 대신 현재 파일 타입을 보고 조건처리를 해주는 방식으로 구현해보았다.
+
+```c
+#define OPEN_MAX 128
+
+struct process
+{
+  ...
+  struct fd_table_entry fd_table[OPEN_MAX];
+};
+```
+File descriptor table은 고정된 길이의 배열 형식으로 `process` 구조체, 즉 process control block 위에 선언하였다. 현재는 최대 128개의 fd만 필요하고 후술할 메모리 누수를 관리하기 쉽게 하기 위해서 고정 배열 형식으로 선언했는데, 사용할 fd가 더욱 많아질 경우 `list` 형태로 선언해 fd를 동적으로 할당 및 해제하는 방식으로 재구현해야 할 것이다.
+
+```c
+void
+init_process (struct process *p)
+{
+  memset (p, 0, sizeof *p);
+  ...
+
+  p->fd_table[0].in_use = true;
+  p->fd_table[0].type = FILETYPE_STDIN;
+  p->fd_table[1].in_use = true;
+  p->fd_table[1].type = FILETYPE_STDOUT;
+}
+```
+fd table을 위와 같이 초기화해준다. fd 0과 1을 제외한 모든 엔트리는 0 `{NULL, false, FILETYPE_FILE}`으로 초기화되고 fd 0과 1만 사전 정의된 대로 초기화해준다.
+
+```c
+int
+get_available_fd (struct process *p)
+{
+  for (size_t i = 0; i < OPEN_MAX; i++)
+  {
+    if (!p->fd_table[i].in_use)
+      return i;
+  }
+  /* No more available fd in the table */
+  return -1;
+}
+```
+새로 fd를 할당하기 전 어디에 할당할 수 있는지를 반환하는 함수. 기본적으로 사용 가능한 fd 중 가장 낮은 번호를 반환한다. 고정 배열이므로 단순히 가장 낮은 인덱스부터 순차적으로 확인하는 방법으로 구현이 가능하다. 만약 모든 fd가 점유 중일 경우 `-1`을 반환한다.
+
+```c
+bool
+set_fd (struct process *p, int fd, struct file *_file)
+{
+  if (!(0 <= fd && fd < OPEN_MAX)) return false;
+  if (p->fd_table[fd].in_use) return false;
+  p->fd_table[fd].file = _file;
+  p->fd_table[fd].in_use = true;
+  /* Currently there's no way to open STDIN or STDOUT
+     Unless there's dup syscall or something */
+  p->fd_table[fd].type = FILETYPE_FILE;
+  return true;
+}
+```
+프로세스의 fd 엔트리를 실제로 할당해주는 함수. 올바르지 않은 fd 번호가 들어오거나 이미 점유 중인 fd를 할당 시도할 경우 (`open-twice` 테스트로 확인) 실패를 반환한다. 정상적인 시도일 경우 `p->fd_table[fd]`에 새로운 파일 포인터를 저장해준다.
+
+```c
+void
+remove_fd (struct process *p, int fd)
+{
+  if(!(2 <= fd && fd < OPEN_MAX)) return;
+  /* Intended not to check the validity */
+  p->fd_table[fd].in_use = false;
+}
+```
+할당했던 fd를 해제하는 함수. 엄밀히 말하자면 할당되지 않은 fd를 해제해도 아무 일도 일어나지 않은 채 정상적으로 종료된다 (Linux 상에서 코드 테스트로 확인). 여기서는 fd 0과 1을 따로 예외처리 해주었는데, Linux 동작에서는 fd 0과 1도 `close`가 가능했지만 본 프로젝트에선 `close-stdin`과 `close-stdout` 테스트에 따라 해당 시도가 실패해야 하기 때문이다.
+
+#### File lock
+```c
+static struct lock file_lock;
+
+/* Wrapper function for file_lock acquire */
+void
+file_lock_acquire (void)
+{
+  lock_acquire (&file_lock);
+}
+
+/* Wrapper function for file_lock release */
+void
+file_lock_release (void)
+{
+  lock_release (&file_lock);
+}
+```
+파일에 대한 Concurrency 확보를 위해 파일 관련 함수 실행 전후로 `file_lock`을 확보 및 해제해준다. 위 기능이 없을 시 `open-twice` 등의 테스트가 실패할 수 있다.
+
+#### Create
+```c
+static bool
+sys_create (const char *file, unsigned initial_size)
+{
+  if (file == NULL || !check_ptr_in_user_space (file))
+    sys_exit (-1);
+  file_lock_acquire ();
+  bool res = filesys_create (file, initial_size);
+  file_lock_release ();
+  return res;
+}
+```
+올바른 파일 포인터인지 확인한 후 `filesys_create`의 결과를 반환해준다.
+
+#### Remove
+```c
+static bool
+sys_remove(const char *file)
+{
+  if(file == NULL || !check_ptr_in_user_space(file))
+    sys_exit(-1);
+  file_lock_acquire();
+  bool res = filesys_remove(file);
+  file_lock_release();
+  return res;
+}
+```
+올바른 파일 포인터인지 확인한 후 `filesys_remove`의 결과를 반환해준다.
+
+#### Open
+```c
+static int
+sys_open(const char *file)
+{
+  if(file == NULL || !check_ptr_in_user_space(file))
+    sys_exit(-1);
+  
+  /* Whole section is critical section due to open-twice test */
+  file_lock_acquire();
+  struct process *cur = thread_current()->process_ptr;
+
+  int fd = get_available_fd(cur);
+  if(fd == -1)
+  {
+    file_lock_release();
+    return -1;
+  }
+
+  struct file *target_file = filesys_open(file);
+  if(target_file == NULL)
+  {
+    file_lock_release();
+    return -1;
+  }
+
+  /* Should verify the return value but seems okay now */
+  set_fd(cur, fd, target_file);
+
+  file_lock_release();
+  return fd;
+}
+```
+올바른 파일 포인터인지 확인한 후, `filesys_open(file)`을 통해 해당 이름의 파일을 열고 상술한 `get_available_fd`로 사용 가능한 fd를 받아 해당 fd에 파일을 할당한다. 해당 로직 전체를 `file_lock`으로 묶어 critical section으로 만들어줘야 동시에 두 파일을 open 시도해 같은 fd값에 파일을 쓰는 오류가 일어나지 않는다.
+
+#### Filesize
+```c
+static int
+sys_filesize(int fd)
+{
+  if(!(0 <= fd && fd < OPEN_MAX))
+    return -1;
+  
+  struct process *cur = thread_current()->process_ptr;
+
+  struct fd_table_entry *fd_entry = &(cur->fd_table[fd]);
+  if(!(fd_entry->in_use && 
+       fd_entry->type == FILETYPE_FILE && 
+       fd_entry->file != NULL))
+       return -1;
+  
+  file_lock_acquire();
+  int res = file_length(fd_entry->file);
+  file_lock_release();
+
+  return res;
+}
+```
+주어진 fd에 해당하는 파일의 크기를 반환한다. 현재 프로세스의 fd table은 `thread_current()->process_ptr->fd_table`로 접근 가능하다. 현재 가리키고 있는 파일이 할당 중이고, `stdin`이나 `stdout`이 아닌 실제 파일일 경우 `file_length`를 통해 파일 길이를 반환한다. 올바르지 않은 호출일 경우 `-1`을 반환한다.
+
+#### Read
+```c
+static int
+sys_read(int fd, void *buffer, unsigned size)
+{
+  if(!check_ptr_in_user_space(buffer))
+    sys_exit(-1);
+  if(!(0 <= fd && fd < OPEN_MAX))
+    return -1;
+  
+  struct process *cur = thread_current()->process_ptr;
+
+  if(!cur->fd_table[fd].in_use)
+    return -1;
+  
+  int file_type = cur->fd_table[fd].type;
+  if(file_type == FILETYPE_STDIN)
+  {
+    void *cur_pos = buffer;
+    unsigned write_count = 0;
+    while(write_count < size)
+    {
+      if(!check_ptr_in_user_space(cur_pos))
+        sys_exit(-1);
+      uint8_t c = input_getc();
+      if(!put_user((uint8_t *)cur_pos, c))
+        sys_exit(-1);
+      write_count++;
+      cur_pos++;
+    }
+    return write_count;
+  } 
+  else if(file_type == FILETYPE_STDOUT)
+  {
+    /* Actually it also works same as STDIN in LINUX */
+    sys_exit(-1);
+  }
+  else
+  {
+    file_lock_acquire();
+    int res = file_read(cur->fd_table[fd].file, buffer, size);
+    file_lock_release();
+    return res;
+  }
+}
+```
+`buffer`와 fd가 올바른지를 확인한 후, 일반적인 파일일 시 `file_read`를 통해 최대 `size` 바이트만큼을 파일에서 읽어 `buffer`에 복사한다. 만약 fd가 0이었을 경우 `input_getc`와 `put_user` 함수들을 이용해 키보드 입력에서 한 바이트씩 읽어 `buffer`에 복사한다. fd가 1일 경우 Linux에서는 stdin과 똑같이 키보드 입력에서 데이터를 복사해오지만 본 프로젝트에선 `exit(-1)`을 실행하도록 하였다.
+
+#### Write
+```c
+static int
+sys_write(int fd, const void *buffer, unsigned size)
+{
+  if(!check_ptr_in_user_space(buffer))
+    sys_exit(-1);
+  if(!(0 <= fd && fd < OPEN_MAX))
+    return -1;
+  
+  struct process *cur = thread_current()->process_ptr;
+
+  if(!cur->fd_table[fd].in_use)
+    return -1;
+  
+  int file_type = cur->fd_table[fd].type;
+  if(file_type == FILETYPE_STDIN)
+  {
+    /* Actually it also works same as STDOUT in LINUX */
+    sys_exit(-1);
+  } 
+  else if(file_type == FILETYPE_STDOUT)
+  {
+    putbuf(buffer, size);
+    return size;
+  }
+  else
+  {
+    file_lock_acquire();
+    int res = file_write(cur->fd_table[fd].file, buffer, size);
+    file_lock_release();
+    return res;
+  }
+}
+```
+`sys_read`와 유사한 로직으로 구현하였고, `file_write`를 통해 최대 `size` 바이트만큼을 `buffer`에서 읽어 파일에 복사한다. fd가 1일 때는 `putbuf`를 호출하여 해당 내용을 콘솔에 출력한다. fd가 0일 경우 Linux에서는 stdout과 동일하게 콘솔에다 출력하지만 본 프로젝트에선 `exit(-1)`을 실행하도록 하였다.
+
+#### Seek
+```c
+static void
+sys_seek(int fd, unsigned position)
+{
+  if(!(0 <= fd && fd < OPEN_MAX))
+    return;
+  
+  struct process *cur = thread_current()->process_ptr;
+
+  struct fd_table_entry *fd_entry = &(cur->fd_table[fd]);
+  if(!(fd_entry->in_use && 
+       fd_entry->type == FILETYPE_FILE && 
+       fd_entry->file != NULL))
+       return;
+  
+  file_lock_acquire();
+  file_seek(fd_entry->file, position);
+  file_lock_release();
+}
+```
+fd와 파일 검증을 마친 후 `file_seek`를 통해 현재 파일이 보고 있는 위치를 `position`으로 바꿔준다. 파일 크기보다 더 큰 위치로 이동하더라도 정상 동작으로 간주한다.
+
+#### Tell
+```c
+static unsigned
+sys_tell(int fd)
+{
+  if(!(0 <= fd && fd < OPEN_MAX))
+    return -1;
+  
+  struct process *cur = thread_current()->process_ptr;
+
+  struct fd_table_entry *fd_entry = &(cur->fd_table[fd]);
+  if(!(fd_entry->in_use && 
+       fd_entry->type == FILETYPE_FILE && 
+       fd_entry->file != NULL))
+       return -1;
+  
+  file_lock_acquire();
+  unsigned res = file_tell(fd_entry->file);
+  file_lock_release();
+
+  return res;
+}
+```
+fd와 파일 검증을 마친 후 `file_tell`을 통해 현재 파일이 보고 있는 위치를 반환한다.
+
+#### Close
+```c
+static void
+sys_close(int fd)
+{
+  if(!(0 <= fd && fd < OPEN_MAX))
+    return;
+  
+  struct process *cur = thread_current()->process_ptr;
+
+  struct fd_table_entry *fd_entry = &(cur->fd_table[fd]);
+  if(fd_entry->in_use && 
+     fd_entry->type == FILETYPE_FILE && 
+     fd_entry->file != NULL)
+  {
+    file_lock_acquire();
+    file_close(fd_entry->file);
+    file_lock_release();
+  }
+
+  remove_fd(cur, fd);
+}
+```
+fd와 파일 검증을 마친 후 `file_close`를 통해 파일을 닫아준다.
 
 ## 발전한 점
 ## 한계

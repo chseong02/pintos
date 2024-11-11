@@ -241,17 +241,6 @@ setup_args_stack (char **argv, size_t *argv_len, uint32_t argc,
   *esp = (void*) ptr_argv_addr;
 }
 
-// TODO: 임시 구현임. 추후 삭제 필요.
-// busy하게 체크하는 스레드 실행 확인 함수.
-// 실행시 aux를 -1로 변경
-static void
-check_thread_exist(struct thread *t, void *aux)
-{
-  if(t->tid == *(tid_t *)aux){
-    *(tid_t *)aux = -1;
-  }
-}
-
 /* Waits for thread TID to die and returns its exit status.  If
    it was terminated by the kernel (i.e. killed due to an
    exception), returns -1.  If TID is invalid or if it was not a

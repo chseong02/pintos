@@ -176,7 +176,8 @@ sys_exec (const char *cmd_line)
   struct process *p;
   tid_t tid = process_execute (cmd_line);
   if (tid == TID_ERROR)
-    return TID_ERROR;
+    return PID_ERROR;
+  /* Last added child */
   elem = list_back (&thread_current ()->process_ptr->children);
   p = list_entry (elem, struct process, elem);
   return p->pid;
@@ -206,14 +207,17 @@ sys_exit (int status)
 static int
 sys_wait (pid_t pid)
 {
-  struct thread *cur = thread_current();
+  struct thread *cur = thread_current ();
   struct list* children = &cur->process_ptr->children;
+
+  /* find pid process in children */
   for (struct list_elem *e = list_begin (children); e != list_end (children); 
     e = list_next (e))
   {
     struct process *p = list_entry (e, struct process, elem);
     if (p->pid == pid)
     {
+      /* Wait for child exit */
       sema_down (&p->exit_code_sema);
       list_remove (e);
       int exit_code = p->exit_code;

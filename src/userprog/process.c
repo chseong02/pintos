@@ -202,6 +202,7 @@ parse_args (char *cmd_line_str, char **argv, size_t *argv_len, uint32_t *argc)
   }
 }
 
+
 static void
 setup_args_stack (char **argv, size_t *argv_len, uint32_t argc, 
   void **esp)
@@ -209,16 +210,16 @@ setup_args_stack (char **argv, size_t *argv_len, uint32_t argc,
   char *ptr_argv = (char*) *esp;
   for (int i = argc - 1; i >= 0; i--)
   {
-    ptr_argv = ptr_argv - (char*)(argv_len[i]);
-    strlcpy (ptr_argv, (const char*) argv[i], (size_t)(argv_len[i]));
+    ptr_argv = ptr_argv - (char*) (argv_len[i]);
+    strlcpy (ptr_argv, (const char*) argv[i], (size_t) (argv_len[i]));
   }
 
-  ptr_argv = (char *)(((uint32_t) ptr_argv) - (4-(((uint32_t) ptr_argv) % 4)) % 4);
+  ptr_argv = (char *)(((uint32_t) ptr_argv) - ((uint32_t) ptr_argv) % 4);
   ptr_argv -= 4;
 
   char** ptr_argv_addr = (char **) ptr_argv;
   
-  *((uint32_t *)ptr_argv_addr) = 0;
+  *((uint32_t *) ptr_argv_addr) = 0;
   ptr_argv_addr--;
 
   char* argv_addr_iter_ptr = (char*) *esp; 
@@ -229,10 +230,10 @@ setup_args_stack (char **argv, size_t *argv_len, uint32_t argc,
     ptr_argv_addr--;
   }
 
-  *ptr_argv_addr = (char**)(ptr_argv_addr + 1);
+  *ptr_argv_addr = (char**) (ptr_argv_addr + 1);
   ptr_argv_addr--;
 
-  *(uint32_t*)ptr_argv_addr = argc;
+  *(uint32_t*) ptr_argv_addr = argc;
   ptr_argv_addr--;
   
   *ptr_argv_addr = 0;

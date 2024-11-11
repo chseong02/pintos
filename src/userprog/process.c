@@ -202,11 +202,31 @@ parse_args (char *cmd_line_str, char **argv, size_t *argv_len, uint32_t *argc)
   }
 }
 
+/* A function that formats and pushes arguments for the loaded program 
+   onto the stack.
+   The stack is set according to the following format.
 
+   Example cmd line: "/bin/ls -l foo bar" 
+   Address 	    Name 	            Data 	        Type
+   0xbffffffc 	argv[3][...] 	    "bar\0" 	    char[4]
+   0xbffffff8 	argv[2][...] 	    "foo\0" 	    char[4]
+   0xbffffff5 	argv[1][...] 	    "-l\0" 	      char[3]
+   0xbfffffed 	argv[0][...] 	    "/bin/ls\0" 	char[8]
+   0xbfffffec 	word-align 	      0 	          uint8_t
+   0xbfffffe8 	argv[4] 	        0 	          char *
+   0xbfffffe4 	argv[3] 	        0xbffffffc 	  char *
+   0xbfffffe0 	argv[2] 	        0xbffffff8 	  char *
+   0xbfffffdc 	argv[1] 	        0xbffffff5 	   char *
+   0xbfffffd8 	argv[0] 	        0xbfffffed 	  char *
+   0xbfffffd4 	argv 	            0xbfffffd8 	  char **
+   0xbfffffd0 	argc 	            4 	          int
+   0xbfffffcc 	return address 	  0 	          void (*) ()   <- esp
+*/
 static void
 setup_args_stack (char **argv, size_t *argv_len, uint32_t argc, 
   void **esp)
 {
+  /* argv string */
   char *ptr_argv = (char*) *esp;
   for (int i = argc - 1; i >= 0; i--)
   {
@@ -214,6 +234,7 @@ setup_args_stack (char **argv, size_t *argv_len, uint32_t argc,
     strlcpy (ptr_argv, (const char*) argv[i], (size_t) (argv_len[i]));
   }
 
+  /* Word Align */
   ptr_argv = (char *)(((uint32_t) ptr_argv) - ((uint32_t) ptr_argv) % 4);
   ptr_argv -= 4;
 
@@ -222,6 +243,7 @@ setup_args_stack (char **argv, size_t *argv_len, uint32_t argc,
   *((uint32_t *) ptr_argv_addr) = 0;
   ptr_argv_addr--;
 
+  /* argv string pointer */
   char* argv_addr_iter_ptr = (char*) *esp; 
   for(int i = argc-1; i >= 0; i--)
   {
@@ -230,9 +252,11 @@ setup_args_stack (char **argv, size_t *argv_len, uint32_t argc,
     ptr_argv_addr--;
   }
 
+  /* argv address */
   *ptr_argv_addr = (char**) (ptr_argv_addr + 1);
   ptr_argv_addr--;
 
+  /* argument count */
   *(uint32_t*) ptr_argv_addr = argc;
   ptr_argv_addr--;
   

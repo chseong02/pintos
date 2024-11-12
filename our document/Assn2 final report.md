@@ -278,8 +278,10 @@ process_execute (const char *file_name)
 위의 작업들을 통해 Argument Passing을 구현하여 올바르게 파일을 오픈하여 유저 프로그램을 수행하고 유저 프로그램 실행시 명령어의 argument들을 올바르게 넘겨줄 수 있게 되었다.
 
 ### System Call - Basement
-TODO: 치호 디자인 레포트와 뭐가 다른지
-
+기존 디자인 레포트의 Process Control Block에 대한 struct의 명세에서 각 프로세스의 스레드 id를 나타내는 `tid`, 현재 실행하고 있는 프로그램 파일을 나타내는 `file_exec`이 추가되었다.
+또한 기존 디자인 레포트에서는 PCB 초기화를 위해 `pcb_init` 함수 하나만을 계획하였으나 Process/System Call 시스템 전반에 사용되는 전역 변수(`pid_lock`,`file_lock`)을 초기화하고 Main Program의 스레드 생성, 초기화 과정이 다른 여타 스레드와 다르기에 별도의 프로세스 초기화 함수가 필요하여 이를 위한 함수 `procoess_init`을 추가하였다.
+마지막으로 기존 계획에는 기존의 스레드 생성 함수인 `thread_create`에 프로세스 관련 내용을 추가하기로 하였으나 이렇게 되면 커널 스레드, 유저 스레드를 구분할 수 없고 기존 `thread_create`를 사용 중인 모든 곳을 변경해야하기에 유저 프로세스의 스레드를 생성할 때만 사용하는 별도의 함수 `thread_create_with_pcb`를 추가하였다.
+이외에 계획과 동일한 기능을 하되 사소하게 변수 명 및 함수 명이 변경되었다.
 #### `struct process` in `userprog/process`
 `process` 구조체는 Process Control Block을 표현하는 구조체로 스레드의 정보를 표현하고 스레드를 관리하는데 사용하는 `struct thread`와 동일한 역할을 프로세스 관리 및 시스템 콜에서 수행한다.
 `process`는 `exec`, `wait`, `exit`과 같은 프로세스에 직접 연관 있는 시스템 콜 및 프로세스 간에 관여하는 시스템 콜을 쉽게 통제하고 프로세스별 file system call 사용 현황 관리 및 관련 synchronization 문제들을 쉽게 해결하기 위해 존재한다.
@@ -317,8 +319,8 @@ struct process
 | `children`       | `struct list`                     | 자식 프로세스 리스트                        |
 | `elem`           | `stuct list_elem`                 | 자식 프로세스 리스트를 구성하기 위한 `list_elem`   |
 | `exec_load_sema` | `struct semaphore`                | 부모 프로세스에게 로드 여부를 알려주기 위한 semaphore |
-| `file_exec`      | `struct file*`                    | 프로세스가 현재 실행중인 프로그램 파일                               |
-| `fd_table`       | `struct fd_table_entry[OPEN_MAX]` | 프로세스마다 독립적인 file descriptor의 배열                               |
+| `file_exec`      | `struct file*`                    | 프로세스가 현재 실행중인 프로그램 파일              |
+| `fd_table`       | `struct fd_table_entry[OPEN_MAX]` | 프로세스마다 독립적인 file descriptor의 배열    |
 `exit_code_sema` 값이 의미하는 바
 - 0: 아직 해당 프로세스 exit 안함. (+ 부모가 exit 확인시 해당 상태 직후 바로 `process`는 할당 해제됨.)
 - 1: 해당 프로세스 exit됨. 하지만 부모는 아직 알지 못함.
@@ -387,6 +389,12 @@ init_process (struct process *p)
   list_init (&p->children);
 
   /* Initialize fd table */
+  for (size_t i = 0; i < OPEN_MAX; i++)
+  {
+    p->fd_table[i].file = NULL;
+    p->fd_table[i].in_use = false;
+    p->fd_table[i].type = FILETYPE_FILE;
+  }
   p->fd_table[0].in_use = true;
   p->fd_table[0].type = FILETYPE_STDIN;
   p->fd_table[1].in_use = true;
@@ -488,10 +496,9 @@ thread_create_with_pcb (const char *name, int priority, struct process* p_ptr,
 - `t->process_ptr = p_ptr;`를 통해 새로 생성한 `thread`의 `process_ptr`을 넘겨준 `p_ptr`로 설정하게 한다. 즉 `p_ptr`의 `process`와 새로 생성한 스레드가 관계를 형성하는 것이다.
 - `t->process_ptr->tid=tid;`를 통해 해당 스레드와 연결된 `process`의 `tid`를 현재 스레드의 `tid`로 설정하여 양방향 관계를 형성한다.
 
-TODO: 치호 process 프로세스 파일 내 어디서 사용되는지?
-
 ### System Call - System Call Handler
-
+기존 디자인에서는 시스템 콜에 유저가 넘겨준 포인터가 유효한지 검증하는 로직에 대한 계획이 없었다. 하지만 유저는 신뢰하면 안되기에 유저가 시스템 콜에 넘겨준 주소를 검증하는 로직들을 추가하였다. 
+또한 기존 디자인에서는 시스템 콜의 argument 처리에 관한 계획이 부족하여 본 구현에서는 interrupt frame의 esp이후에 4바이트씩 끊어 읽어 Argument를 얻는 `get_arg`함수를 추가하였다.
 #### Virtual Memory User Space
 System call 함수들을 구현할 때 가상 메모리 위의 User Space에 있는 주소에만 읽고 쓰는 것이 가능하도록 핸들링을 해줘야 했다. Pintos 문서에는 이를 구현하기 위한 두 가지 방법이 제시되어 있는데, 이번 프로젝트에선 해당 위치가 User space인지 Kernel space인지만 검사한 뒤 User space 내에서의 잘못된 참조는 Page fault handler가 관리하도록 구현하였다.
 
@@ -578,7 +585,7 @@ get_user_bytes (void *dest, const void *src, size_t num)
 
 임의 길이 write 함수는 이번 프로젝트에서 사용처가 없어 구현하지 않았다.
 
-`syscall_handler` in `userprog/syscall`
+#### System Call Arguments
 
 System call이 호출되었을 때 추가로 전달되는 인자들은 `Stack pointer + 4` 위치부터 4바이트 단위로 순서대로 배치되어있다. 이를 가져오기 위해 원하는 만큼의 인자를 읽어 가져오는 `get_args` 함수를 구현했다.
 
@@ -596,6 +603,9 @@ get_args (int *sp, int *dest, size_t num)
 }
 ```
 
+전달되는 인자의 수는 호출되는 System call마다 다르므로, System call 핸들러가 호출되고 어떤 함수가 호출되었는지 알아낸 뒤 위의 함수를 통해 인자를 읽어와 실행해준다.
+
+#### `syscall_handler` in `userprog/syscall`
 ```c
 static void
 syscall_handler (struct intr_frame *f) 
@@ -680,12 +690,154 @@ syscall_handler (struct intr_frame *f)
 
 ### System Call - User Process Manipulation
 #### `sys_halt` in `userprog/syscall`
+```c
+static void
+sys_halt ()
+{
+  shutdown_power_off ();
+  NOT_REACHED ();
+}
+```
+> SYS_HALT 시스템 콜에 대응되는 함수. Pintos 자체를 종료시킨다.
+
+`shutdown_power_off`를 호출하여 Pintos 자체를 종료시킨다.
+
 #### `sys_exec` in `userprog/syscall`
+```c
+static pid_t
+sys_exec (const char *cmd_line)
+{
+  struct list_elem *elem;
+  struct process *p;
+  tid_t tid = process_execute (cmd_line);
+  if (tid == TID_ERROR)
+    return PID_ERROR;
+  /* Last added child */
+  elem = list_back (&thread_current ()->process_ptr->children);
+  p = list_entry (elem, struct process, elem);
+  return p->pid;
+}
+```
+> SYS_EXEC 시스템 콜에 대응되는 함수
+
+main thread에서 user program을 실행하듯이 `process_execute`를 통해 `cmd_line`을 실행하기 위한 스레드를 생성한다. 만일 스레드 생성 실패시 PID_ERROR(-1)을 반환한다.
+생성 성공시 해당 시스템 콜을 호출한 스레드의 `process_ptr->children`의 맨 뒤의 `process`를 참조한다. 이는 `cmd_line`을 수행하기 위해 이번에 생성한 프로세스이다. 그리고 해당 프로세스의 id를 리턴한다.
+
+```c
+tid_t
+process_execute (const char *file_name) 
+{
+  ...
+
+  /* Create a new thread to execute FILE_NAME. */
+  tid = thread_create_with_pcb (file_name_copy, PRI_DEFAULT, p, start_process, 
+    full_cmd_line_copy);
+
+  ...
+
+  /* System call Exec Load Sync */
+  sema_down(&(p->exec_load_sema));
+
+  ...
+
+  return tid;
+}
+```
+유저 프로그램을 수행하는 스레드를 생성하는 `process_execute`에서 `thread_create_with_pcb`를 통해 `start_process`를 수행하는 스레드를 생성한 이후 새로 생성된 스레드의 `start_process`에서 `load`가 정상적으로 완료되길 기다리기 위해 `sema_down(&(p->exec_load_sema));`을 추가하였다. `start_process`에서 load 완료시 뒤를 넘어가 리턴할 수 있게 된다.
+
+```c
+static void
+start_process (void *file_name_)
+{
+
+  ...
+
+  parse_args (file_name, argv, argv_len, &argc);
+  success = load (file_name, &if_.eip, &if_.esp) && success;
+  
+  ...
+
+  /* System call Exec Load Sync */
+  sema_up (&t->process_ptr->exec_load_sema);
+
+  /* If load failed, quit. */
+  if (!success) 
+    thread_exit ();
+    
+  asm volatile ("movl %0, %%esp; jmp intr_exit" : : "g" (&if_) : "memory");
+  NOT_REACHED ();
+}
+```
+유저 프로그램을 수행하기 위해 유저 프로세스의 스레드가 수행하는 함수로 `start_process`는 유저 프로그램을 로드 후 해당 프로그램으로 넘어가게 된다. 이 때 자식 프로세스의 `load` 이후 부모의 `sys_exec` 시스템콜에 대해 반환하기 위해 `load`이후 ` sema_up (&t->process_ptr->exec_load_sema);`을 추가해주었다.
 #### `sys_exit` in `userprog/syscall`
+이번 프로젝트의 목표 중 하나인 **Process Termination Messages**에 대한 구현도 포함되어 있다.
+```c
+void
+sys_exit (int status)
+{
+  struct thread *cur = thread_current ();
+  printf ("%s: exit(%d)\n", cur->name, status);
+  cur->process_ptr->exit_code = status;
+
+  file_close (cur->process_ptr->file_exec);
+  for (size_t i = 2; i < OPEN_MAX; i++)
+  {
+    if(cur->process_ptr->fd_table[i].in_use)
+    {
+      file_close (cur->process_ptr->fd_table[i].file);
+      remove_fd (cur->process_ptr, i);
+    }
+  }
+  sema_up (&(cur->process_ptr->exit_code_sema));
+  thread_exit ();
+  NOT_REACHED ();
+}
+```
+> SYS_EXIT 시스템 콜에 대응되는 함수. 
+
+현재 `thread`의 이름, 인수로 받은 `status`를 이용해 형식에 맞추어 Process Termination Message를 출력한다.
+- 시스템 콜 처리 중 각종 오류 발생시 `sys_exit(-1)`로 프로그램을 종료한다.
+입력 받은 `status`를 현재 스레드의 `process->exit_code`에 집어 넣어 이후 부모 프로세스가 볼 수 있도록 한다.
+`file_close`를 통해 현재 실행 중이었던 프로그램 파일을 close하고 `cur->process_ptr->fd_table`을 순회하며 해당 프로세스가 사용 중이였던 파일들도 닫은 뒤 그 descriptor도 할당 해제해준다.
+`cur->process_ptr->exit_code_sema`를 `sema_up`해주어 자식 프로세스가 exit하기를 wait하는 부모 프로세스가 이후 wait 절차를 진행할 수 있게 한다.
+- 해당 자식의 `exit_code`를 얻을 수 있다.
+이후 `thread_exit`을 통해 해당 스레드에게 할당된 자원들을 해제하게 된다.
+- `process`에 대한 자원(`process` 할당 페이지)은 부모의 `wait`에서 수행된다.
+
 #### `sys_wait` in `userprog/syscall`
+```c
+static int
+sys_wait (pid_t pid)
+{
+  struct thread *cur = thread_current ();
+  struct list* children = &cur->process_ptr->children;
+
+  /* find pid process in children */
+  for (struct list_elem *e = list_begin (children); e != list_end (children); 
+    e = list_next (e))
+  {
+    struct process *p = list_entry (e, struct process, elem);
+    if (p->pid == pid)
+    {
+      /* Wait for child exit */
+      sema_down (&p->exit_code_sema);
+      list_remove (e);
+      int exit_code = p->exit_code;
+      palloc_free_page (p);
+      return exit_code;
+    }
+  }
+  return -1;
+}
+```
+> SYS_WAIT 시스템 콜에 대응되는 함수. 
+
+현재 스레드의 `process_ptr->children`, 해당 스레드의 프로세스의 자식 프로세스를 순회하며 인수의 `pid`를 `process.pid`로 가지는 `process`인 `p`를 찾는다. 
+`sema_down (&p->exit_code_sema)`을 통해 `p` 프로세스가 `sys_exit`을 호출하여 (종료할 때까지) `sema_up`할 때까지 기다린다. 이후 자식 프로세스의 `sys_exit`을 통해 `sema_up`되면 `children`에서 해당 자식 프로세스의 `list_elem`을 제거하고 `p->exit_code`를 통해 마지막에 exit_code를 얻어 반환한다. 그 전에 exit된 해당 자식 프로세스의 `process`에 할당된 페이지를 해제해 준다.
+만약 `process.pid`가 `pid`인 프로세스를 찾지 못하였다면 -1을 반환한다.
+- 해당 프로세스는 이미 wait했거나 현재 프로세스의 자식 프로세스가 아니다.
 
 ### System Call - File Manipulation
-
 File manipulation과 관련된 System call의 대부분이 File descriptor 시스템을 필요로 한다.
 
 #### File Descriptor in `userprog/process`
@@ -1052,7 +1204,7 @@ struct process
   ...
 };
 ```
-PCB에 현재 실행중인 프로그램 파일을 나타내는 포인터 변수를 추가해준다.
+PCB에 현재 실행 중인 프로그램 파일을 나타내는 포인터 변수를 추가해준다.
 
 ```c
 bool
@@ -1098,16 +1250,34 @@ sys_exit (int status)
 ```
 Deny 해제는 프로세스가 종료되고 `exit`을 호출하는 도중 `file_close`를 통해 현재 실행중이었던 프로그램 파일을 close해주면 완료된다. (내부적으로 `file_allow_write` 호출)
 
+
 ## 발전한 점
-ㅇㄹ
+먼저 기존에는 유저 프로그램을 정상적으로 실행조차 할 수 없는 상황이였다.
+왜냐하면 커맨드라인으로 입력 받은 실행하고자 하는 유저 프로그램의 명칭을 정확히 파싱하지 않아 유저 프로그램 로드에 실패하였기 때문이다. 또한 모든 시스템 콜 호출시 스레드를 단순히 종료시키고 각 시스템 콜에 대한 올바른 작동을 하지 않았다.
+
+### Process Terminiation Messages
+Process Termination Message를 통해 유저 프로그램이 종료되었을 때, 또는 유저 프로그램이 생성한 다른 프로세스 들이 종료되었을 때 어떤 프로세스가 종료되었는지, 왜 종료되었는지, 오류로 인한 것인지 등을 알 수 있게 되었다.
+
+### Argument Passing
+유저가 핀토스에게 실행하라고 넘겨준 명령어를 올바르게 파싱해서 해석할 수 있게 되었다. 실행할 파일명의 스레드 명을 가지는 유저 프로세스에 대한 스레드를 만들 수 있다. 또한 이전에는 실행할 프로그램과 프로그램에 넘겨줄 arguments를 구분하지 못하여 "프로그램명+arguments"를 load하려고 하여 올바른 유저 프로그램을 불러와 실행할 수 없었는데 이제 이 둘을 구분하여 올바른 유저 프로그램을 실행할 수 있다. 또한 이제 80x86 Calling Convention을 준수하여 Argument Passing을 통해 원하는 argument, 함수 인자를 유저 프로그램에 넘겨 실행할 수 있다.
+
+### System Call
+유저 프로그램에서 유용하게 사용할 수 있는 여러 시스템 콜 기능을 사용할 수 있게 되었다. 
 
 ## 한계
-ㅇㄹ
+### 부모, 자식 프로세스 life cycle 한계
+현재 구현은 부모, 자식의 프로세스 life cycle에서 다소 이상적인 다음 가정을 필요로 한다. "부모 프로세스는 자식 프로세스가 종료하기 전까지 유지된다." \
+현재 구현상 만일 부모 프로세스가 자식 프로세스보다 먼저 종료된다면 부모 프로세스가 자식 프로세스를 wait할 수 없으므로 자식 프로세스(스레드에 대한 자원을 할당 해제됨.)의 프로세스 자원(Process Control Block(`process`)에 할당된 페이지 등)을 할당 해제 할 수 없다. 즉 일종의 좀비 프로세스, 고립된 프로세스가 될 수 있다. 이를 위해 자식 프로세스를 아직 종료되지 않은 다른 프로세스에게 자식으로 넘겨주거나 부모 프로세스가 종료될 때 자신의 자식 프로세스들이 이후 PCB를 할당 해제할 것을 보장하는 구현을 추가해야할 것이다.
+
+### 프로세스 - 스레드 1대1 매핑
+현재 구현상 한 프로세스는 한 스레드를 가진다. `process`가 하나의 `tid`를 가지고 `thread`도 하나의 process 포인터 `process_ptr`을 가지기 때문이다. 하지만 실제로는 멀티 스레드 프로그램 등은 한 프로세스가 여러 스레드를 실행하고자 하기도 한다. 이를 위해 현재 `process`가 자식 프로세스들 `children`을 관리하는 것과 유사하게 리스트로 여러 `tid` 또는 `thread` 포인터 등을 가질 수 있게 해야 한다.
 
 ## 배운 점
+유저 프로그램 실행시의 Argument Passing 및 System Call Handler의 Argument Passing, `hex_dump` 등을 이용한 메모리 상에서의 디버깅 방법을 알 수 있게 되었다.
 커맨드 라인의 작동 방식
 포인터 활용 
 Virtual Memory 작동 방식, User pool과 Kernel Pool
 메모리 누수 관리의 어려움.
 좀비 프로세스
+
 

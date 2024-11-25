@@ -219,6 +219,104 @@ struct s_page_table_entry
 
 ## 5. File Memory Mapping
 
+### Basics
+File Memory Mapping이란 파일을 가상 메모리 위의 연속적인 공간에 맵핑한 뒤, 일반적인 가상 메모리 접근과 동일하게 데이터에 접근하는 기법을 뜻한다.
+```c
+mapid_t
+mmap (int fd, void *addr)
+{
+  return syscall2 (SYS_MMAP, fd, addr);
+}
+
+void
+munmap (mapid_t mapid)
+{
+  syscall1 (SYS_MUNMAP, mapid);
+}
+```
+Pintos 프로젝트에서 이를 구현하기 위해서는 프로젝트 2에서 구현한 시스템 콜 핸들러에 추가로 `mmap`과 `munmap` 시스템 콜을 구현해야 한다.
+
+### Limitations and Necessity
+- 파일의 특정 위치의 데이터를 읽어야 하는데 페이지 테이블 위에 정보가 없을 때만 page fault handler를 통해 해당 페이지 정보를 읽어오는 Lazy loading이 일어나기 때문에 파일을 한 번에 읽어오는 방법보다 오버헤드가 적고, page hit일 경우 기존 데이터를 재사용 가능하다는 장점이 있다.
+- 또한 파일에 write 연산을 수행할 경우 디스크에 직접 연산이 일어나는 것이 아니라 메모리 상에만 수정사항이 반영되고, 추후에 페이지가 evict될 때 수정사항을 디스크에 한 번에 반영하여 write할 때도 오버헤드가 줄어드는 효과가 있다.
+
+File Memory Mapping과 디스크 직접 접근에 대한 장단점을 정리하자면 다음과 같다.
+| |장점|단점|
+|-|-|-|
+|File Memory Mapping|Lazy Loading을 통한 오버헤드 감소, Page hit일 때 데이터 재사용 가능|파일 크기 변경 불가, 메모리 부족으로 인한 파일 맵핑 크기 제한
+|디스크 직접 접근|메모리 부족 X|잦은 접근에 대한 오버헤드 높음
+
+현재 Pintos 프로젝트의 구현의 경우 File Memory Mapping이 구현되어있지 않기 때문에 대용량의 파일에 접근해야 할 경우 시스템 콜을 통해 디스크에 직접 접근해야 하며, 실행 파일 역시 데이터 전체를 메모리 위로 복사해야 하기 때문에 오버헤드가 크다.
+
+### Blueprint
+각 프로세스는 여러 개의 파일에 접근해 `mmap`을 호출할 수 있고, `mmap`으로 생성된 각 맵핑은 메모리 상의 여러 페이지와 대응된다. 따라서 이를 일관적으로 관리하기 위해서는 파일과 페이지의 연결 관계를 2차원 연결 리스트 형태로 나타내어 프로세스 별로 관리하는 것이 옳다고 생각되어 다음과 같이 구현 계획을 세웠다.
+
+```c
+struct fmm_data
+{
+  mapid_t id;
+  struct file *file;
+
+  struct list page_list;
+  struct list_elem fmm_data_list_elem;
+}
+```
+우선 `mmap`으로 맵핑된 각 파일에 대한 페이지들을 관리하기 위해 위와 같은 구조체를 선언한다. `id`는 각 맵핑마다 할당되는 고유한 넘버링이고, `*file`은 어떤 파일이 맵핑되었는지를 나타낸다. 해당 파일에 대한 접근으로 생성되는 페이지는 `page_list` 리스트에서 일괄적으로 관리한다.
+
+```c
+struct process
+{
+  ...
+  struct list fmm_data_list;
+  ...
+}
+```
+그리고 프로세스 구조체 아래에 `fmm_data` 구조체들을 관리할 리스트인 `fmm_data_list`를 추가한다. `fmm_data` 구조체의 `fmm_data_list_elem`는 위 리스트의 원소로 사용되기 위해 필요하여 추가하였다. 파일에 대한 접근 및 맵핑 정보는 프로세스 별로 독립적이고, 한 프로세스 아래의 스레드들은 모두 동일한 가상 메모리 공간을 공유하므로 파일들에 대한 맵핑 정보인 `fmm_data_list`는 스레드가 아닌 프로세스에서 관리하는 것이 옳다고 판단하였다.
+
+```c
+mapid_t
+sys_mmap (int fd, void *addr)
+{
+  if(
+    /* empty file */ ||
+    /* addr is not page alligned */ ||
+    /* mapped page already exists in the range */ ||
+    addr == NULL ||
+    fd < 2
+    )
+      return MAP_FAILED;
+    
+  /* Create new struct fmm_data, initialize it and push into the list */
+  /* allocate new mapid for new fmm */
+  return mapid;
+}
+```
+`mmap` 시스템 콜은 위와 같이 validity 확인을 해준 뒤 새 `fmm_data` 구조체를 동적할당받아 맵핑 정보를 설정해주는 식으로 구현할 예정이다.
+
+```c
+void
+sys_munmap (mapid_t mapid)
+{
+  if(/* not a valid mapid */) return;
+
+  struct fmm_data *fmm;
+  for(/* i in fmm_data_list */)
+  {
+    if(i->id == mapid) fmm = i, break;
+  }
+
+  for(/* p in fmm->page_list */)
+  {
+    if(/* p is dirty */)
+      /* update file on disk */
+    /* delete p */
+  }
+
+  /* free fmm */
+}
+```
+`munmap` 시스템 콜은 위와 같이 인자로 주어진 `mapid`에 대응하는 맵핑을 찾은 후, 해당 맵핑에서 생성한 페이지들을 모두 삭제해주도록 구현한다. 이때 페이지에 write 연산이 일어난 적이 있어 dirty bit가 설정되어 있을 경우 변경 사항을 디스크 위의 실제 파일에 반영해줘야 한다.
+
 ## 6. Swap Table
 
 ## 7. On Process Termination

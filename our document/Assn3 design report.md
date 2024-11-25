@@ -36,7 +36,8 @@ struct thread
   };
 ```
 모든 프로세스(스레드)는 각자의 Page Directory를 가지고 있으며 독립적으로 관리하게 된다. 위 `pagedir`은 Page Directory로 사용되게 할당 받은 페이지의 시작 주소(kernel virtual Address임)로, Page Directory 시작 위치이다. 추후 이 pagedir은 `pagedir_activate` in `userprog/pagedir.c`의 `asm volatile ("movl %0, %%cr3" : : "r" (vtop (pd)) : "memory");`를 통해 활성화되어 virtual address -> physical address의 변환 및 매핑을 설정하게 된다.
-Pintos의 Virtual Memory는 아래 구조처럼 구성되며 Virtual Address는 32bit로 표현되며 다음 구조를 가지고 있다. 
+Pintos의 Virtual Memory는 아래 구조처럼 구성되며 Virtual Address는 32bit로 표현되며 다음 구조를 가지고 있다.
+Virtual Address는 Page Directory Index 10비트, Page Table Index 10비트, Page offset이 12비트로 이루어진다. 위에서 말한 것과 같이 Page Number가 총 20비트로 1024 * 1024 개의 page를 표현할 수 있는데 이를 Page Directory(1024 index), Page Table(1024)로 2단계로 구분하여 이와 같은 구조를 띄게 된 것이다. 
 ```c
  31                  22 21                  12 11                   0
 +----------------------+----------------------+----------------------+
@@ -73,7 +74,7 @@ pintos는 각 스레드마다 각기 다른 page directory를 가지고 있고 �
 |           Physical Address            |                 |U|W|P|
 +---------------------------------------+----+----+-+-+---+-+-+-+
 ```
-엔트리의 앞선 31~12bit는 각각 다른 page table의 시작 physical address의 31~12bit 부분을 담고 있다. 이 때 뒤의 12bit를 포함하지 않아도 되는 이유는 page table의 시작 위치가 4KB 정렬될 것이 보장되기 때문이다. 이는 추후 나올 Page Table Entry에서도 동일하다. 하위 11~0 bit에는 page directory entry에 대한 flag들이 포함된다. 
+엔트리의 앞선 31~12bit는 각각 다른 page table의 시작 physical address의 31~12bit 부분을 담고 있다. 이 때 뒤의 12bit를 포함하지 않아도 되는 이유는 page table의 시작 위치가 4KB 정렬될 것이 보장되기 때문에 뒷 주소 12bit는 모두 0이기 때문이다. 이는 추후 나올 Page Table Entry에서도 동일하다. 하위 11~0 bit에는 page directory entry에 대한 flag들이 포함된다. 
 ```c
 static inline uint32_t pde_create (uint32_t *pt) {
   ASSERT (pg_ofs (pt) == 0);
@@ -84,9 +85,50 @@ static inline uint32_t pde_create (uint32_t *pt) {
 | Flag    | 없을 때                        | 있을 때                  |
 | ------- | --------------------------- | --------------------- |
 | `PTE_U` | kernel만 접근 가능               | kernel, user 모두 접근 가능 |
-| `PTE_P` | PTE 존재X, 다른 flag 모두 의미 없어짐. | PTE 존재O, 유효           |
+| `PTE_P` | PDE 존재X, 다른 flag 모두 의미 없어짐. | PDE 존재O, 유효           |
 | `PTE_W` | read-only                   | read/write 둘 다 가능     |
 `pde_create`는 주어진 page table을 가르키는 page directory entry를 생성하는 함수로 base page directory를 초기화하는 `paging_init`에서 kernel virtual memory에 대한 page를 초기화할 때 또는 `lookup_page`에서 virtual address에 대한 page table entry가 없을 때, 생성하는 도중 사용한다.
+##### `pagedir_create` in `userprog/pagedir.c`
+```c
+uint32_t *
+pagedir_create (void) 
+{
+  uint32_t *pd = palloc_get_page (0);
+  if (pd != NULL)
+    memcpy (pd, init_page_dir, PGSIZE);
+  return pd;
+}
+```
+page directory를 생성하는 함수로 page directory를 위한 page를 할당 받고 여기에 `init_page_dir`을 복사해 넣는다. `init_page_dir`은 base page directory로 kernel virtual memory - physical memory mapping을 포함하고 있으며 모든 page directory가 생성시 해당 pd를 복제함으로써 해당 매핑을 모든 page directory가 가질 수 있게 한다.
+해당 함수는 userprogram load시 해당 프로세스의 스레드의 독립적인 page directory를 구축할 때 사용한다.
+##### `pagedir_destroy`
+```c
+void
+pagedir_destroy (uint32_t *pd) 
+{
+  uint32_t *pde;
+
+  if (pd == NULL)
+    return;
+
+  ASSERT (pd != init_page_dir);
+  for (pde = pd; pde < pd + pd_no (PHYS_BASE); pde++)
+    if (*pde & PTE_P) 
+      {
+        uint32_t *pt = pde_get_pt (*pde);
+        uint32_t *pte;
+        
+        for (pte = pt; pte < pt + PGSIZE / sizeof *pte; pte++)
+          if (*pte & PTE_P) 
+            palloc_free_page (pte_get_page (*pte));
+        palloc_free_page (pt);
+      }
+  palloc_free_page (pd);
+}
+```
+user virtual memory에 대응되는 page directory entry가 가르키는 page table과 해당 page table의 entry와 대응되는 할당된 page(`palloc_get_page`에 의해서)를 할당 해제해준다. 마지막으로 page directory에 할당된 page도 할당 해제한다.
+이로써 해당 프로세스의 page directory 자원이 할당 해제되고 프로세스 자원 해제`process_exit`에서 사용된다.
+
 
 각 Page Table Entry가 가르키는 Page Table은 1024개의 Page Table Entry로 구성되어 있다. 각 Page Table Entry는 아래 같은 구조를 가진다.
 ```c
@@ -96,17 +138,34 @@ static inline uint32_t pde_create (uint32_t *pt) {
 +---------------------------------------+----+----+-+-+---+-+-+-+
 ```
 상위 31~12 비트는 해당 Page와 매핑된 Frame(Physical Memory 단위)의 상위 20비트이다. Frame은 Page와 유사하기 4KB이며 4kb로 aligned되어 있어 Frame의 시작 주소는 하위 12개 비트가 0임이 보장된다. PTE의 하위 12비트에는 Page Table Entry에 대한 Flag가 포함되어 있다.
+```c
+static inline uint32_t pte_create_kernel (void *page, bool writable) {
+  ASSERT (pg_ofs (page) == 0);
+  return vtop (page) | PTE_P | (writable ? PTE_W : 0);
+}
+```
 
-| Flag    | 없을 때                        | 있을 때                  |
-| ------- | --------------------------- | --------------------- |
-| `PTE_U` | kernel만 접근 가능               | kernel, user 모두 접근 가능 |
-| `PTE_P` | PTE 존재X, 다른 flag 모두 의미 없어짐. | PTE 존재O, 유효           |
-| `PTE_W` | read-only                   | read/write 둘 다 가능     |
+| Flag    | 없을 때                        | 있을 때              |
+| ------- | --------------------------- | ----------------- |
+| `PTE_P` | PTE 존재X, 다른 flag 모두 의미 없어짐. | PTE 존재O, 유효       |
+| `PTE_W` | read-only                   | read/write 둘 다 가능 |
+위의 구조와 달리 실제 kernel virtual page에 대한 page table entry 생성은 `PTE_P`,`PTE_W` flag만을 포함한다. 
+```c
+static inline uint32_t pte_create_user (void *page, bool writable) {
+  return pte_create_kernel (page, writable) | PTE_U;
+}
+```
 
-0~11 bit
-먼저 각 스레드의 `pagedir`에 해당하는 주소를 본다. 이는 page directory 테이블의 시작점이다. 해당 테이블 시작점부터 virtual address의 31~22bit 값, `page directory index`에 해당하는 위치의 값을 읽어 들인다. 해당 위치에는 한 page table의 시작점을 담고 있다. 
+| Flag    | 없을 때                  | 있을 때                |
+| ------- | --------------------- | ------------------- |
+| `PTE_U` | kernel virtual memory | user virtual memory |
+user virtual page에 대한 page table entry 생성은 `PTE_P`,`PTE_U`,`PTE_W` flag를 포함하게 된다.
+
+##### `` 
+```c
+```
 #### Frame
-pintos에서 **Physical Memory**를 관리할 때 사용하는 단위로 연속된 공간의 Physical Memory로, page와 동일하게 **4KB**이다. pintos에서 page는 관리하기 위해 page directory, page table 등 을 구현하고, 함수들의 반환 값으로 사용하는 등 빈번하게 사용되는 반면, frame은 `pagedir_set_page`와 `install_page` 등에서 간접적으로 언급되는 것을 제외하고는 다른 곳에서는 거의 사용되거나 언급되지 않는다. 
+pintos에서 **Physical Memory**를 관리할 때 사용하는 단위로 연속된 공간의 Physical Memory로, page와 동일하게 **4KB**이다. pintos에서 page는 관리하기 위해 page directory, page table 등 을 구현하고, 함수들의 반환 값으로 사용하는 등 빈번하게 사용되는 반면, frame은 `pagedir_set_page`와 `install_page` 등에서 간접적으로 언급되는 것을 제외하고는 직접적으로 언급되지 않는다. 그대신 `kernel page와 user page의 매핑`이라는 용어를 통해 사용된다.
 ```c
    31               12 11        0
   +-------------------+-----------+
@@ -172,21 +231,19 @@ paging_init (void)
 base page directory `init_page_dir`에 page를 할당한다. 물리주소 0부터 page의 크기(4kB)만큼 주소를 늘려가며 해당 Physical Address에 대응되는 kernel virtual address(0xc0000000 이상)에 대한 Page Table Entry를 `pte_create_kernel`을 통해 생성한다. 중간에 Page Directory, Page Table에 대한 공간 할당이 필요하다면 `palloc_get_page`를 통해 공간을 할당한다.
 위 과정을 `init_ram_pages`(Physical Memory / 4kB, 가능한 페이지/프레임 개수)만큼 반복한다.
 마지막으로 cr3 레지스터가 `init_page_dir`의 물리 주소를 가리키게 한다. 
-이로써 Kernel Virtual Memory(존재하는 Physical Memory만큼)와 Physical Memory는 대응되게 된다. **즉 Kernel Virtual Address의 page를 physical frame처럼 취급할 수 있게 된다.**
+이로써 Kernel Virtual Memory(존재하는 Physical Memory만큼)와 Physical Memory는 대응되게 된다. **즉 Kernel Virtual Address의 page를 physical frame처럼 취급할 수 있게 된다.** 모든 process의 page directory는 virtual-physical mapping이 포함된 `init_page_dir`을 복사하여 생성되므로 동일한 virtual-physical mapping을 가지고 있게 된다.
 
 위의 내용들은 Pintos에서 Kernel Virtual Memory를 통해 간접적으로 원하는 Physical Address의 Physical Memory의 Frame에 접근할 수 있도록 한다.
 아래 구현은 Pintos에서 User Virtual Address/Page에 Frame을 연결하는 방법이다. 
 ```
 ```
-
-
+TODO
 #### Page Allocator
-TODO:
-
-#### Manage 
-
+이름은 `palloc_get_page`, `palloc_free_page`로 "Page" Allocator처럼 작동하지만 실상은 frame allocator에 가깝다.
+TODO
 ### Limitations and Necessity
-현재 Pintos에는 Frame이라는 개념이 존재하고 Physical Memory와 매핑된 Virtual Kernel Memory Page를 Frame으로써 사용한다. `pagedir_set_page`에서 `palloc_get_page` 해 얻은 page(kernel virtual address의 page, pintos에서 frame처럼 사용하는 page)를 user virtual address의 page로써 사용함으로써 user virtual page를 세팅한다. 이것이 frame과 관련된 구현의 전부로 frame이나 physical frame에 연결된 kernel virtual page를 별도로 관리하지 않아 frame이 부족할 때 evict할 page를 정하는데 어려움을 겪는다. 이를 개선하기 위해 어떤 Frame이 어떤 Page와 매핑되어 있는지를 관리하는 Frame Table이 필요하다.
+현재 Pintos에는 `kernel virtual page - physical memory 매핑` 을 통해 frame 접근방식을 제공하고 `user virtual page`를  `kernel virtual page` 매핑(user virtual page table entry는 kernel virtual page table entry의 복사본 + user flag)하여 user virtual page가 간접적으로 frame을 할당 받을 수 있도록 하였다.
+이것이 frame과 관련된 구현의 전부로 frame(kernel virtual page)과 user virtual page 간의 매핑을 별도로 관리하지 않아 frame이 부족할 때 evict할 page를 정하는데 어려움을 겪는다. 이를 개선하기 위해 어떤 Frame(kernel virtual page)이 어떤 Page(user virtual page)와 매핑되어 있는지를 관리하는 Frame Table이 필요하다.
 ### Blueprint
 아래 코드들은 c와 유사한 문법을 작성한 대략적인 구조, 알고리즘을 나타낸 pseudo 코드이다.
 우리는 Frame Table을 `list` 자료구조를 이용해 설계하기로 결정하였다. 
@@ -317,14 +374,26 @@ falloc_free_frame (void *frame)
 ```
 
 ## 2. Lazy Loading
+### Basics
 ```c
 ```
+### Limitations and Necessity
 
+### Blueprint
+```c
+
+```
 ## 3. Supplemental Page Table
+### Basics
+```c
+```
+### Limitations and Necessity
+
+### Blueprint
 ```c
 struct s_page_table_entry 
 {
-	bool in_use;
+	bool present;
 	bool in_swap;
 	bool has_loaded;
 	bool writable;
@@ -336,6 +405,11 @@ struct s_page_table_entry
 ```
 
 ## 4. Stack Growth
+### Basics
+
+### Limitations and Necessity
+
+### Blueprint
 
 ## 5. File Memory Mapping
 
@@ -361,10 +435,11 @@ Pintos 프로젝트에서 이를 구현하기 위해서는 프로젝트 2에서 
 - 또한 파일에 write 연산을 수행할 경우 디스크에 직접 연산이 일어나는 것이 아니라 메모리 상에만 수정사항이 반영되고, 추후에 페이지가 evict될 때 수정사항을 디스크에 한 번에 반영하여 write할 때도 오버헤드가 줄어드는 효과가 있다.
 
 File Memory Mapping과 디스크 직접 접근에 대한 장단점을 정리하자면 다음과 같다.
-| |장점|단점|
-|-|-|-|
-|File Memory Mapping|Lazy Loading을 통한 오버헤드 감소, Page hit일 때 데이터 재사용 가능|파일 크기 변경 불가, 메모리 부족으로 인한 파일 맵핑 크기 제한
-|디스크 직접 접근|메모리 부족 X|잦은 접근에 대한 오버헤드 높음
+
+|                     | 장점                                               | 단점                                   |
+| ------------------- | ------------------------------------------------ | ------------------------------------ |
+| File Memory Mapping | Lazy Loading을 통한 오버헤드 감소, Page hit일 때 데이터 재사용 가능 | 파일 크기 변경 불가, 메모리 부족으로 인한 파일 맵핑 크기 제한 |
+| 디스크 직접 접근           | 메모리 부족 X                                         | 잦은 접근에 대한 오버헤드 높음                    |
 
 현재 Pintos 프로젝트의 구현의 경우 File Memory Mapping이 구현되어있지 않기 때문에 대용량의 파일에 접근해야 할 경우 시스템 콜을 통해 디스크에 직접 접근해야 하며, 실행 파일 역시 데이터 전체를 메모리 위로 복사해야 하기 때문에 오버헤드가 크다.
 

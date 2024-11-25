@@ -243,11 +243,11 @@ TODO
 TODO
 ### Limitations and Necessity
 현재 Pintos에는 `kernel virtual page - physical memory 매핑` 을 통해 frame 접근방식을 제공하고 `user virtual page`를  `kernel virtual page` 매핑(user virtual page table entry는 kernel virtual page table entry의 복사본 + user flag)하여 user virtual page가 간접적으로 frame을 할당 받을 수 있도록 하였다.
-이것이 frame과 관련된 구현의 전부로 frame(kernel virtual page)과 user virtual page 간의 매핑을 별도로 관리하지 않아 frame이 부족할 때 evict할 page를 정하는데 어려움을 겪는다. 이를 개선하기 위해 어떤 Frame(kernel virtual page)이 어떤 Page(user virtual page)와 매핑되어 있는지를 관리하는 Frame Table이 필요하다.
+이것이 frame과 관련된 구현의 전부로 frame(kernel virtual page)과 user virtual page 간의 매핑을 별도로 관리하지 않아 frame이 부족할 때 evict할 (user page - frame의 매핑을 끊을) page를 정하는데 어려움을 겪는다. 이를 개선하기 위해 어떤 Frame(kernel virtual page)이 어떤 Page(user virtual page)와 매핑되어 있는지를 관리하는 Frame Table이 필요하다.
 ### Blueprint
 아래 코드들은 c와 유사한 문법을 작성한 대략적인 구조, 알고리즘을 나타낸 pseudo 코드이다.
 우리는 Frame Table을 `list` 자료구조를 이용해 설계하기로 결정하였다. 
-- 이와 같이 결정한 이유 중 하나는 `pintos`에서 `inode`를 이미 `list`를 이용해 관리하고 있기 때문이다. 또한 `list`를 이용한 구현이 간단하며 실제로 사용하고 있는 frame만 저장하기에 효율적이고 이후 clock 알고리즘을 evict policy로 사용할 시 구현이 상대적으로 편한 이점이 있다.
+- 이와 같이 결정한 이유 중 하나는 `pintos`에서 비슷한 예시로 `inode`를 이미 `list`를 이용해 관리하고 있기 때문이다. 또한 `list`를 이용한 구현이 간단하며 실제로 사용하고 있는 frame만 저장하기에 효율적이고 이후 clock 알고리즘을 evict policy로 사용할 시 구현이 상대적으로 직관적인 이점이 있다.
 #### Frame Table
 ```c
 static struct list frame_table;
@@ -261,14 +261,16 @@ struct frame_table_entry
 	struct list_elem elem;
 }
 ```
+`frame_table`은 Frame Table로 전역에 하나만 존재한다. 
+- kpage는 frame으로 전역에서 각각 유일하며(kernel virtual page-physical memory mapping은 모든 page directory에서 공유됨.), user page는 어떤 스레드(`tid`)의 user page인지로 구별할 수 있다.
 
-| 멤버         | 자료형         | 설명                                         |
-| ---------- | ----------- | ------------------------------------------ |
-| `tid`      | `tid_t`     | 해당 frame을 점유하고 있는 thread의 id               |
-| `upage`    | `void *`    | `kpage`와 매핑될 user virtual page             |
-| `kpage`    | `void *`    | physical frame과 매칭되는 kernel virtual page   |
-| `use_flag` | `bool`      | clock 알고리즘에서 사용할 use flag                  |
-| `elem`     | `list_elem` | `frame_table`를 `list`로 구성하기 위한 `list_elem` |
+| 멤버         | 자료형         | 설명                                                                  |
+| ---------- | ----------- | ------------------------------------------------------------------- |
+| `tid`      | `tid_t`     | 해당 frame을 점유하고 있는 thread의 id, `upage`가 어떤 스레드의 user virtual page인지. |
+| `upage`    | `void *`    | `kpage`와 매핑될 user virtual page                                      |
+| `kpage`    | `void *`    | physical frame과 매칭되는 kernel virtual page                            |
+| `use_flag` | `bool`      | clock 알고리즘에서 사용할 use flag                                           |
+| `elem`     | `list_elem` | `frame_table`를 `list`로 구성하기 위한 `list_elem`                          |
 
 ```c
 void
@@ -277,24 +279,25 @@ frame_table_init()
 	list_init(&frame_table);
 }
 ```
+frame table을 초기화하는 함수로 kernel 초기화 과정 중 `paging_init` 직후 호출한다.
 
 `palloc_get_page`를 비롯한 page allocator(실제로는 physical memory와 매핑된 kernel virtual page만을 반환하므로 frame allocator 역할을 수행) `palloc`을 대체하기 위한 `falloc` (Frame Allocator)를 추가한다. `falloc`은 기존 `palloc` 역할에 더해 `frame_table`을 함께 변경시킨다.
 ```c
-enum falloc_get_page
+enum falloc_flags
 {
 	FAL_ASSERT = 001,
 	FAL_ZERO = 002,
 	FAL_USER = 004,
 }
 ```
-`vmalloc_get_page`를 위한 flag enum이다.
+`vmalloc_get_page`를 위한 flag enum이다. 기존의 `enum palloc_flags`와 동일한 역할과 구성이다.
 
 | Flag         | 없을 때                    | 있을 때                                                                    |
 | ------------ | ----------------------- | ----------------------------------------------------------------------- |
 | `FAL_ASSERT` | allocation 실패시 null 반환  | allocation 실패시 panic                                                    |
 | `FAL_ZERO`   |                         | page 0으로 초기화. `PAL_ZERO`에 대응.                                           |
 | `FAL_USER`   | page를 kernel pool에서 가져옴 | page를 user pool에서 가져옴. `PAL_USER`에 대응                                   |
-
+`falloc_get_page`는 모든 상황에서 `FAL_USER` flag가 함께하길 기대한다. 이번 프로젝트의 대부분 작업이 user virtual memory를 다루는 일이기 때문이다. 
 ```c
 void *
 falloc_get_frame_w_upage (enum falloc_flags, void* upage)
@@ -303,6 +306,7 @@ falloc_get_frame_w_upage (enum falloc_flags, void* upage)
 	if(kpage == null)
 	{
 		//TODO: evict policy
+		evict_policy();
 		*kpage = palloc_get_page(falloc_flags);
 		if(kpage == null)
 			return null;
@@ -326,6 +330,7 @@ falloc_get_frame_w_upage (enum falloc_flags, void* upage)
 	list_push_back(&frame_table, &fte->elem);
 }
 ```
+주어진 `upage` user virtual page에 `frame`(kernel virtual page)를 매핑하고 frame table에 해당 매핑을 등록하는 함수의 pseudo코드이다.  만약 `palloc_get_page`가 실패한다면, 즉 할당 가능한 남은 frame이 없다면 후술할 evict policy에 근거하여 특정한 user virtual page의 frame 매핑을 제거하여 frame을 확보한다. 이후 다시 `palloc_get_page`를 통해 frame 할당을 시도한다. 올바르게 frame을 얻었다면 해당 frame에 대한`frame_table_entry` 값을 초기화해준 뒤 `frame_table`에 추가한다. `frame_table_entry`를 위한 공간을 할당하기 위해서는 `malloc`을 이용해 `frame_table_entry`만큼의 공간만큼만 할당할 것이다.
 
 ```c
 *struct frame_table_entry
@@ -341,6 +346,7 @@ find_frame_table_entry_from_frame(void *frame)
 	return null;
 }
 ```
+`frame`을 입력할 시 해당 `frame`(kernel virtual page)와 매핑된 `frame_table_entry`를 반환하는 함수이다. `frame_table`을 순회하며 입력된 `frmae`과 엔트리의 `kpage`가 동일하면 해당 엔트리 주소를 반환한다. 만약 frame table에없는 frame이라면 null을 반환한다. `falloc_free_frame`에서 frame에 대응되는 entry를 찾을 때 사용한다.
 
 ```c
 struct frame_table_entry *
@@ -356,6 +362,7 @@ find_frame_table_entry_from_upage(void *upage)
 	return null;
 }
 ```
+`upage`을 입력할 시 해당 `upage`(user virtual page)와 매핑된 `frame_table_entry`를 반환하는 함수이다. `frame_table`을 순회하며 입력된 `upage`과 엔트리의 `upage`가 동일하면 해당 엔트리 주소를 반환한다. 만약 `upage` user page와 매핑된 `frame`이 존재하지 않다면 null을 반환한다. 즉  해당 user virtual page는 `frame`을 할당받지 못한 상태이다.(swap out 또는 lazy loading)
 
 ```c
 void
@@ -372,24 +379,71 @@ falloc_free_frame (void *frame)
 	free(&fte);
 }
 ```
+입력받은 `frame`에 대응되는 `frame_table_entry`를 찾는다. (사용되고 있는 올바른 frame인가?) 이후 entry를 frame table에서 삭제한 후, 해당 frame을 `palloc_free_page`로 할당 해제하고 frame table entry로 할당 해제한다.
 
+이렇게 완성된 falloc interface는 기존에 user virtual memory에 대해서 사용되던 `palloc_get_page`, `palloc_free_page` 등을 대체하여 사용한다.
+- 프로젝트 2의 `load_segment`, `setup_stack` 등의 `palloc`을 대체한다.
 ## 2. Lazy Loading
 ### Basics
 ```c
+
 ```
 ### Limitations and Necessity
 
-### Blueprint
-```c
 
+
+### Blueprint
+Lazy Loading을 구현하기 위해서는 먼저 3. Supplemental Page Table이 구현되어 있어야 한다. (3번 항목을 먼저 참고)
+```c
+load lazily at load segment
+```
+
+```c
+bool
+is_valid_page()
+{
+
+}
+```
+
+```c
+void*
+load_frame_mapped_page()
+{
+
+}
+```
+
+```c
+page fault handler
 ```
 ## 3. Supplemental Page Table
 ### Basics
+Page Table과 Page Table Entry에 대한 자세한 설명은 1. Frame Table에서 다루었기에 간단히 작성하도록 하겠다.
 ```c
+
 ```
 ### Limitations and Necessity
-
+기존의 Page Table과 Page Table Entry는 Frame을 할당 받은 Page에 대한 Page Table Entry만 Page Table에 유의미하게 존재하였다(present bit이 0일시는 아무런 의미를 가지지 않는다). 즉 기존의 Page Table은 `Page를 할당 받는다 = Frame을 할당 받았다` 였다. 그렇기에 Virtual Memory에 존재하려면 반드시 Physical Memory에도 올라와 있어야 했다. 이로 인해 Physical Memory 보다 큰 크기의 파일을 읽거나 프로그램을 로드할 수 없어 실행할 수 없었다. virtual memory는 physical memory와 별개의 넓은 address space를 사용할 수 있을 것으로 기대하였으나 결국에는 남은 physical memory의 크기에 바운드되어 사용 가능한 virtual memory의 크기는 한정되었다.
+만약 frame과 page의 연결성을 끊어준다면 frame을 할당 받지 않은 page를 생성할 수 있게 되며 보다 넓게 virtual memory를 사용할 수 있으며 physical memory 자원인 frame을 때에 맞게 page에 할당해줄 수 있게 된다. 기존 page table entry는 이처럼 frame과 page(user virtual page)의 연결성을 끊는 상황을 고려할 수 없다. 또한 기존 page table entry는 먼저 virtual page를 할당한 이후에 frame을 할당할 때/실제로 physical memory를 할당받을 때 어떤 옵션으로 frame을 할당할지, 파일을 저장한 virtual page라면 파일의 어떤 부분을 로드해야 하는지를 포함할 수 없다.
+이러한 문제를 개선하여 page와 frame을 연결성을 끊고 page를 frame과 무관하게 관리하게 위해 새로운 형식의 page table entry, 즉 보충된 정보들을 갖는 supplemental page table entry와 이들을 담는 supplemental page table이 필요해졌다.
 ### Blueprint
+우리는 Supplemental Page Table을 Pintos에서 제공하는 자료구조 `hash`, hash table을 이용해 구현하기로 결정하였다.
+
+```c
+struct thread {
+	...
+#ifdef USERPROG
+    /* Owned by userprog/process.c. */
+    uint32_t *pagedir;                  /* Page directory. */
+    struct hash s_page_table;
+    struct process* process_ptr;
+#endif
+	...
+}
+```
+다음처럼 기존에 page directory에 대한 포인터를 저장하던 `thread->pagedir`처럼 `thread`에 supplemental page table `hash s_page_table`을 추가한다. 이 때 `hash`는 `list`와 유사하게 ...
+supplemental page table은 기존 page directory처럼 각 프로세스(핀토스는 프로세스-스레드 1대1)마다 각각 관리하게 된다.
 ```c
 struct s_page_table_entry 
 {
@@ -399,8 +453,81 @@ struct s_page_table_entry
 	bool writable;
 	bool is_dirty;
 	bool is_accessed;
-	struct frame_table_entry *frame;
+	bool is_lazy;
+	struct file* file;
+	off_t file_ofs;
+	void *upage;
+	void *kpage;
+	enum falloc_flags;
 	struct hash_elem elem;
+}
+```
+`s_page_table_entry`는 `s_page_table`을 구성하는 page table entry이다.
+
+| 멤버             | 자료형            | 설명                                                                                                                                                                            |
+| -------------- | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `present`      | `bool`         | 현재 유효한 값을 가진 page table entry인지 여부<br>swap이든, lazy loading 중과 무관하게, frame 할당 여부와 무관하게 해당 page table entry의 정보가 유효한지 여부<br>해당 값이 false라면 아래 값들은 모두 무시되며, 다른 값들로 임의로 초기화될 수 있다. |
+| `in_swap`      | `bool`         | 현재 swap disk에 있는지 여부<br>swap disk에 있다면 true,                                                                                                                                  |
+| `has_loaded`   | `bool`         | lazy loading에서 사용되며 실제로 frame을 할당받았었는지 여부.<br>lazy loading에서 load 전까지는 false                                                                                                  |
+| `writable`     | `bool`         | 기존 pte의 writable bit                                                                                                                                                          |
+| `is_dirty`     | `bool`         | 기존 pte의 dirty bit                                                                                                                                                             |
+| `is_accessed`  | `bool`         | 기존 pte의 accessed bit                                                                                                                                                          |
+| `is_lazy`      | `bool`         | lazy loading의 대상인지 여부                                                                                                                                                         |
+| `file`         | `struct file*` | 어떤 파일을 loading해야하는지에 대한 변수<br>lazy loading에서 사용한다.<br>`is_lazy`가 참일 때 유효한 값.                                                                                                  |
+| `file_ofs`     | `off_t`        | `file`의 어디부터 담은 page인지, lazy loading시 활용하기 위해 page만 미리 할당받을 때 해당 page가 file 중 어느 부분에 대한 것인지 정할 때 사용.<br>`is_lazy`가 참일 때 유효한 값.                                                |
+| `upage`        | `void *`       | `user virtual page`                                                                                                                                                           |
+| `kpage`        | `void *`       | `in_swap`이 거짓이고 `has_loaded`이 참일 때, 해당 user page `upage`에 매핑된 frame(kernel virtual page)<br>swap out, lazy loading에 의해 frame이 할당되지 않아 유효한 값이 아닐 수도 있다.                        |
+| `falloc_flags` | `enum`         | (lazy loading시) frame할당시 `falloc_get_page`에서 사용할 옵션                                                                                                                           |
+| `elem`         | `hash_elem`    | `s_page_table`를 `hash`로 구성하기 위한 `hash_elem`                                                                                                                                   |
+
+```c
+void
+init_s_page_table(hash* s_page_table)
+{
+	hash_init(s_page_table, s_page_table_hash_func, s_page_table_hash_less_func);
+}
+```
+
+```c
+unsigned
+s_page_table_hash_func(const struct hash_elem *e, void *aux)
+{
+	struct s_page_table_entry *spte = hash_entry(e, struct hash_table_entry, elem);
+	return hash_bytes(&spte->upage,32);
+}
+```
+
+```c
+bool
+s_page_table_hash_less_func(const struct hash_elem *a, const struct hash_elem *b, void *aux)
+{
+	struct s_page_table_entry *_a = hash_entry(a, struct hash_table_entry, elem);
+	struct s_page_table_entry *_b = hash_entry(b, struct hash_table_entry, elem);
+	return a->upage < b->upage;
+}
+```
+
+```c
+s_page_table_entry*
+spte_create(hash *spt, bool is_lazy, bool is_file, struct file* file, off_t file_ofs, bool writable, void *upage, void *kpage, enum falloc_flags)
+{
+	
+}
+```
+
+```c
+s_page_table_entry*
+find_s_page_table_entry_from_frame()
+{
+	
+}
+```
+
+```c
+s_page_table_entry*
+find_s_page_table_entry_from_upage()
+{
+	
 }
 ```
 

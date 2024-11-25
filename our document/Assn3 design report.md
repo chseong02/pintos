@@ -9,17 +9,6 @@ Basics : the definition or concept, implementations in original pintos (if exist
 ## 0. Background
 TODO: 아래에 넣기 애매한 내용들/기반이 될 내용들 있다면 추가하기.
 
-## 정리
-`paging_init` in `init.c`
-- page directory
-`pagedir_set_page` in `pagedir.c`
-- page directory PD에 user virtual page UPAGE -> pysical frame(커널 가상 주소 KPAGE로 식별되는) 매핑 추가
-- 이 때 kpage는 `palloc_get_page`로 **사용자풀**에서 얻은 페이지
-`pagedir_create` in `pagedir.c`
-- 새로운 page directory 생성
-	- kernel virtual address에 mapping을 가진,(user xxx)
-스레드별로 독립적인 page dir
-
 ## 1. Frame Table
 ### Basics
 Pintos는 Virtual Memory를 효율적으로 관리/구현하기 위해 Page와 이를 관리하기 위한 Page Directory, Page Table 등을 구현해두었다.
@@ -84,7 +73,7 @@ pintos는 각 스레드마다 각기 다른 page directory를 가지고 있고 �
 |           Physical Address            |                 |U|W|P|
 +---------------------------------------+----+----+-+-+---+-+-+-+
 ```
-엔트리의 앞선 31~12bit는 각각 다른 page table의 시작 physical address의 31~12bit 부분을 담고 있다. 이 때 뒤의 11bit를 포함하지 않아도 되는 이유는 page table의 시작 위치가 4KB 정렬될 것이 보장되기 때문이다. 이는 추후 나올 Page Table Entry에서도 동일하다. 하위 11~0 bit에는 page directory entry에 대한 flag들이 포함된다. 
+엔트리의 앞선 31~12bit는 각각 다른 page table의 시작 physical address의 31~12bit 부분을 담고 있다. 이 때 뒤의 12bit를 포함하지 않아도 되는 이유는 page table의 시작 위치가 4KB 정렬될 것이 보장되기 때문이다. 이는 추후 나올 Page Table Entry에서도 동일하다. 하위 11~0 bit에는 page directory entry에 대한 flag들이 포함된다. 
 ```c
 static inline uint32_t pde_create (uint32_t *pt) {
   ASSERT (pg_ofs (pt) == 0);
@@ -97,13 +86,23 @@ static inline uint32_t pde_create (uint32_t *pt) {
 | `PTE_U` | kernel만 접근 가능               | kernel, user 모두 접근 가능 |
 | `PTE_P` | PTE 존재X, 다른 flag 모두 의미 없어짐. | PTE 존재O, 유효           |
 | `PTE_W` | read-only                   | read/write 둘 다 가능     |
+`pde_create`는 주어진 page table을 가르키는 page directory entry를 생성하는 함수로 base page directory를 초기화하는 `paging_init`에서 kernel virtual memory에 대한 page를 초기화할 때 또는 `lookup_page`에서 virtual address에 대한 page table entry가 없을 때, 생성하는 도중 사용한다.
 
+각 Page Table Entry가 가르키는 Page Table은 1024개의 Page Table Entry로 구성되어 있다. 각 Page Table Entry는 아래 같은 구조를 가진다.
 ```c
  31                                   12 11 9      6 5     2 1 0
 +---------------------------------------+----+----+-+-+---+-+-+-+
 |           Physical Address            | AVL|    |D|A|   |U|W|P|
 +---------------------------------------+----+----+-+-+---+-+-+-+
 ```
+상위 31~12 비트는 해당 Page와 매핑된 Frame(Physical Memory 단위)의 상위 20비트이다. Frame은 Page와 유사하기 4KB이며 4kb로 aligned되어 있어 Frame의 시작 주소는 하위 12개 비트가 0임이 보장된다. PTE의 하위 12비트에는 Page Table Entry에 대한 Flag가 포함되어 있다.
+
+| Flag    | 없을 때                        | 있을 때                  |
+| ------- | --------------------------- | --------------------- |
+| `PTE_U` | kernel만 접근 가능               | kernel, user 모두 접근 가능 |
+| `PTE_P` | PTE 존재X, 다른 flag 모두 의미 없어짐. | PTE 존재O, 유효           |
+| `PTE_W` | read-only                   | read/write 둘 다 가능     |
+
 0~11 bit
 먼저 각 스레드의 `pagedir`에 해당하는 주소를 본다. 이는 page directory 테이블의 시작점이다. 해당 테이블 시작점부터 virtual address의 31~22bit 값, `page directory index`에 해당하는 위치의 값을 읽어 들인다. 해당 위치에는 한 page table의 시작점을 담고 있다. 
 #### Frame
@@ -175,108 +174,145 @@ base page directory `init_page_dir`에 page를 할당한다. 물리주소 0부�
 마지막으로 cr3 레지스터가 `init_page_dir`의 물리 주소를 가리키게 한다. 
 이로써 Kernel Virtual Memory(존재하는 Physical Memory만큼)와 Physical Memory는 대응되게 된다. **즉 Kernel Virtual Address의 page를 physical frame처럼 취급할 수 있게 된다.**
 
-위의 내용들은 Pintos에서 Kernel Virtual Memory를 통해 간접적으로 원하는 Physical Address의 Physical Memory에 접근할 수 있도록 한다.
-아래 구현은 Pintos에서 Ker
+위의 내용들은 Pintos에서 Kernel Virtual Memory를 통해 간접적으로 원하는 Physical Address의 Physical Memory의 Frame에 접근할 수 있도록 한다.
+아래 구현은 Pintos에서 User Virtual Address/Page에 Frame을 연결하는 방법이다. 
 ```
 ```
 
 
 #### Page Allocator
-#### Page Directory
-`paging_init`에 
-##### `paging_init`
-```c
-static void
-paging_init (void)
-{
-  uint32_t *pd, *pt;
-  size_t page;
-  extern char _start, _end_kernel_text;
-
-  pd = init_page_dir = palloc_get_page (PAL_ASSERT | PAL_ZERO);
-  pt = NULL;
-  for (page = 0; page < init_ram_pages; page++)
-    {
-      uintptr_t paddr = page * PGSIZE;
-      char *vaddr = ptov (paddr);
-      size_t pde_idx = pd_no (vaddr);
-      size_t pte_idx = pt_no (vaddr);
-      bool in_kernel_text = &_start <= vaddr && vaddr < &_end_kernel_text;
-
-      if (pd[pde_idx] == 0)
-        {
-          pt = palloc_get_page (PAL_ASSERT | PAL_ZERO);
-          pd[pde_idx] = pde_create (pt);
-        }
-
-      pt[pte_idx] = pte_create_kernel (vaddr, !in_kernel_text);
-    }
-
-  /* Store the physical address of the page directory into CR3
-     aka PDBR (page directory base register).  This activates our
-     new page tables immediately.  See [IA32-v2a] "MOV--Move
-     to/from Control Registers" and [IA32-v3a] 3.7.5 "Base Address
-     of the Page Directory". */
-  asm volatile ("movl %0, %%cr3" : : "r" (vtop (init_page_dir)));
-}
-```
+TODO:
 
 #### Manage 
 
 ### Limitations and Necessity
-현재 Pintos에는 Frame이라는 개념이 존재하지만 `pagedir_set_page`에서 단순히 Virtual Page에 연결되는 물리 공간의 단위로만 사용될 뿐 유의미하게 관리되지 않는다. 그렇기에 만약 Page에 할당될 Frame이 부족할 경우(메모리의 물리적 공간의 부족) 어떤 frame을 page의 연결에서 끊어야 할지 결정할 때 대상이 되는 frame을 정할 때() 어려움을 겪는다. 
+현재 Pintos에는 Frame이라는 개념이 존재하고 Physical Memory와 매핑된 Virtual Kernel Memory Page를 Frame으로써 사용한다. `pagedir_set_page`에서 `palloc_get_page` 해 얻은 page(kernel virtual address의 page, pintos에서 frame처럼 사용하는 page)를 user virtual address의 page로써 사용함으로써 user virtual page를 세팅한다. 이것이 frame과 관련된 구현의 전부로 frame이나 physical frame에 연결된 kernel virtual page를 별도로 관리하지 않아 frame이 부족할 때 evict할 page를 정하는데 어려움을 겪는다. 이를 개선하기 위해 어떤 Frame이 어떤 Page와 매핑되어 있는지를 관리하는 Frame Table이 필요하다.
 ### Blueprint
-아래 코드는 c와 유사한 문법을 작성한 대략적인 구조, 알고리즘을 나타낸 pseudo 코드이다.
+아래 코드들은 c와 유사한 문법을 작성한 대략적인 구조, 알고리즘을 나타낸 pseudo 코드이다.
+우리는 Frame Table을 `list` 자료구조를 이용해 설계하기로 결정하였다. 
+- 이와 같이 결정한 이유 중 하나는 `pintos`에서 `inode`를 이미 `list`를 이용해 관리하고 있기 때문이다. 또한 `list`를 이용한 구현이 간단하며 실제로 사용하고 있는 frame만 저장하기에 효율적이고 이후 clock 알고리즘을 evict policy로 사용할 시 구현이 상대적으로 편한 이점이 있다.
 #### Frame Table
 ```c
+static struct list frame_table;
+
 struct frame_table_entry
 {
-	uint32_t frame_no;
 	tid_t tid;
 	void *upage;
 	void *kpage;
-	bool in_use;
+	bool use_flag;
 	struct list_elem elem;
 }
 ```
 
-```c
-static struct lock frame_lock;
-static struct list frame_table;
-```
+| 멤버         | 자료형         | 설명                                         |
+| ---------- | ----------- | ------------------------------------------ |
+| `tid`      | `tid_t`     | 해당 frame을 점유하고 있는 thread의 id               |
+| `upage`    | `void *`    | `kpage`와 매핑될 user virtual page             |
+| `kpage`    | `void *`    | physical frame과 매칭되는 kernel virtual page   |
+| `use_flag` | `bool`      | clock 알고리즘에서 사용할 use flag                  |
+| `elem`     | `list_elem` | `frame_table`를 `list`로 구성하기 위한 `list_elem` |
 
 ```c
 void
 frame_table_init()
 {
 	list_init(&frame_table);
-	lock_init(&frame_lock);
 }
 ```
+
+`palloc_get_page`를 비롯한 page allocator(실제로는 physical memory와 매핑된 kernel virtual page만을 반환하므로 frame allocator 역할을 수행) `palloc`을 대체하기 위한 `falloc` (Frame Allocator)를 추가한다. `falloc`은 기존 `palloc` 역할에 더해 `frame_table`을 함께 변경시킨다.
+```c
+enum falloc_get_page
+{
+	FAL_ASSERT = 001,
+	FAL_ZERO = 002,
+	FAL_USER = 004,
+}
+```
+`vmalloc_get_page`를 위한 flag enum이다.
+
+| Flag         | 없을 때                    | 있을 때                                                                    |
+| ------------ | ----------------------- | ----------------------------------------------------------------------- |
+| `FAL_ASSERT` | allocation 실패시 null 반환  | allocation 실패시 panic                                                    |
+| `FAL_ZERO`   |                         | page 0으로 초기화. `PAL_ZERO`에 대응.                                           |
+| `FAL_USER`   | page를 kernel pool에서 가져옴 | page를 user pool에서 가져옴. `PAL_USER`에 대응                                   |
 
 ```c
 void *
-vmalloc_get_page (enum vmalloc_flags)
+falloc_get_frame_w_upage (enum falloc_flags, void* upage)
 {
-	
+	void *kpage = palloc_get_page(falloc_flags except FAL_ASSERT);
+	if(kpage == null)
+	{
+		//TODO: evict policy
+		*kpage = palloc_get_page(falloc_flags);
+		if(kpage == null)
+			return null;
+	}
+	struct frame_table_entry *fte = malloc(sizeof *fte);
+	if(fte == null)
+	{
+		palloc_free_page(kpage);
+		if(falloc_flags & FAL_ASSERT)
+			PANIC
+		return null;
+	}
+		tid_t tid;
+	void *upage;
+	void *kpage;
+	bool use_flag;
+	fte->tid = thread_current()->tid;
+	fte->upage = upage;
+	fte->kpage = kpage;
+	fte->use_flag = false;
+	list_push_back(&frame_table, &fte->elem);
 }
 ```
 
 ```c
-enum vmalloc_get_page
+*struct frame_table_entry
+find_frame_table_entry_from_frame(void *frame)
 {
-	VMAL_ASSERT = 001,
-	VMAL_ZERO = 002,
-	VMAL_USER = 004,
-	VMAL_LAZY = 008
+	struct list_elem *e
+	for(e = list_begin(&frame_table); e != list_end(&frame_table); e = list_next(e))
+	{
+		struct frame_table_entry *fte = list_entry(e,struct frame_table_entry, elem);
+		if(fte->kpage == frame)
+			return fte;
+	}
+	return null;
+}
+```
+
+```c
+struct frame_table_entry *
+find_frame_table_entry_from_upage(void *upage)
+{
+	struct list_elem *e
+	for(e = list_begin(&frame_table); e != list_end(&frame_table); e = list_next(e))
+	{
+		struct frame_table_entry *fte = list_entry(e,struct frame_table_entry, elem);
+		if(fte->upage == upage)
+			return fte;
+	}
+	return null;
 }
 ```
 
 ```c
 void
-vmalloc_free_page (void *page)
+falloc_free_frame (void *frame)
 {
-	
+	struct frame_table_entry *fte = find_frame_table_entry_from_frame(frame);
+	if(fte == null)
+	{
+		// ERROR!
+		return;
+	}
+	list_remove(&fte->elem);
+	palloc_free_page(frame);
+	free(&fte);
 }
 ```
 

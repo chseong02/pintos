@@ -2,9 +2,6 @@
 Team 37 
 20200229 김경민, 20200423 성치호 
 
-Basics : the definition or concept, implementations in original pintos (if exists)
-• Limitations and Necessity : the problem of original pintos, the benefit of implementation
-• Blueprint: how to implement it (detailed data structures and pseudo codes
 ## 1. Frame Table
 ### Basics
 Pintos는 Virtual Memory를 효율적으로 관리/구현하기 위해 Page와 이를 관리하기 위한 Page Directory, Page Table 등을 구현해두었다.
@@ -125,7 +122,6 @@ pagedir_destroy (uint32_t *pd)
 user virtual memory에 대응되는 page directory entry가 가르키는 page table과 해당 page table의 entry와 대응되는 할당된 page(`palloc_get_page`에 의해서)를 할당 해제해준다. 마지막으로 page directory에 할당된 page도 할당 해제한다.
 이로써 해당 프로세스의 page directory 자원이 할당 해제되고 프로세스 자원 해제`process_exit`에서 사용된다.
 
-
 각 Page Table Entry가 가르키는 Page Table은 1024개의 Page Table Entry로 구성되어 있다. 각 Page Table Entry는 아래 같은 구조를 가진다.
 ```c
  31                                   12 11 9      6 5     2 1 0
@@ -157,9 +153,6 @@ static inline uint32_t pte_create_user (void *page, bool writable) {
 | `PTE_U` | kernel virtual memory | user virtual memory |
 user virtual page에 대한 page table entry 생성은 `PTE_P`,`PTE_U`,`PTE_W` flag를 포함하게 된다.
 
-##### `` 
-```c
-```
 #### Frame
 pintos에서 **Physical Memory**를 관리할 때 사용하는 단위로 연속된 공간의 Physical Memory로, page와 동일하게 **4KB**이다. pintos에서 page는 관리하기 위해 page directory, page table 등 을 구현하고, 함수들의 반환 값으로 사용하는 등 빈번하게 사용되는 반면, frame은 `pagedir_set_page`와 `install_page` 등에서 간접적으로 언급되는 것을 제외하고는 직접적으로 언급되지 않는다. 그대신 `kernel page와 user page의 매핑`이라는 용어를 통해 사용된다.
 ```c
@@ -231,9 +224,54 @@ base page directory `init_page_dir`에 page를 할당한다. 물리주소 0부�
 
 위의 내용들은 Pintos에서 Kernel Virtual Memory를 통해 간접적으로 원하는 Physical Address의 Physical Memory의 Frame에 접근할 수 있도록 한다.
 아래 구현은 Pintos에서 User Virtual Address/Page에 Frame을 연결하는 방법이다. 
+```c
+static bool
+install_page (void *upage, void *kpage, bool writable)
+{
+  struct thread *t = thread_current ();
+
+  /* Verify that there's not already a page at that virtual
+     address, then map our page there. */
+  return (pagedir_get_page (t->pagedir, upage) == NULL
+          && pagedir_set_page (t->pagedir, upage, kpage, writable));
+}
 ```
+해당 함수는 `upage`에 `kpage`를 install하는, 다른 말로는 mapping, 할당하는 함수이다.
+`kpage`는 이미 `palloc_get_page`를 통해 할당받은 Physical Frame과 매핑된 Kernel Virtual Page이다.
+`upage`는 physical memory를 할당 받고 싶은 user virtual page이다. `install_page`에서 `pagedir_get_page`의 값이 `NULL`인 것을 통해 `upge`에 대응되는 page table entry가 없음을, 즉 할당된 physical frame이 없음을 확인한다. 이후 `pagedir_set_page`를 호출한다.
+
+```c
+bool
+pagedir_set_page (uint32_t *pd, void *upage, void *kpage, bool writable)
+{
+  uint32_t *pte;
+
+  ASSERT (pg_ofs (upage) == 0);
+  ASSERT (pg_ofs (kpage) == 0);
+  ASSERT (is_user_vaddr (upage));
+  ASSERT (vtop (kpage) >> PTSHIFT < init_ram_pages);
+  ASSERT (pd != init_page_dir);
+
+  pte = lookup_page (pd, upage, true);
+
+  if (pte != NULL) 
+    {
+      ASSERT ((*pte & PTE_P) == 0);
+      *pte = pte_create_user (kpage, writable);
+      return true;
+    }
+  else
+    return false;
+}
 ```
-TODO
+`lookup_page`를 통해 `upage`에 대응되는 page table entry 주소를 얻는다. 또한 중간에 없는 page table, page directory entry 등을 생성한다.
+`pte_create_user`를 통해 `kpage`의 page table entry에 `PTE_U`를 추가하여 `upage`의 page table entry로 집어 넣는다. 즉, `palloc_get_page`를 통해 얻은 kernel virtual page(physical frame과 대응되는)와 물리 공간을 할당 받기 원하는 user virtual page간 mapping을 생성하여 간접적으로 user page에 공간을 할당한 것이다.
+이것이 user page가 간접적으로 frame을 할당 받는 방법이다.
+```c
+static inline uint32_t pte_create_user (void *page, bool writable) {
+  return pte_create_kernel (page, writable) | PTE_U;
+}
+```
 #### Page Allocator
 `palloc_get_page`, `palloc_free_page`로 "Page" Allocator처럼 작동하지만 실상은 frame allocator에 가깝다. 
 ```c
@@ -271,7 +309,11 @@ palloc_init (size_t user_page_limit)
              user_pages, "user pool");
 }
 ```
-
+메모리 풀을 초기화하는 함수이다. kernel pool과 user pool은 각각 메모리 전체의 반씩을 가지게 된다. 
+- 메모리 풀의 범위는 `ptov`를 통해 virtual address로 나타나지만 두 pool에 할당될 총 page 개수, 가상 메모리 범위는 physical memory의 크기이다. 
+- `init_ram_pages`는 physical memory의 크기를 page 크기로 나눈 것이다. 
+- kernel pool은 physical memory에 대응되는 kernel virtual memory 앞의 절반을, user pool은 뒤의 절반을 차지하게 된다. 
+pintos kernel 초기화 과정인 `main() in init.c`에서 호출하여 page allocator를 초기화한다.
 
 ```c
 void *
@@ -307,6 +349,9 @@ palloc_get_multiple (enum palloc_flags flags, size_t page_cnt)
   return pages;
 }
 ```
+`PAL_USER`flag에 따라 올바른 pool을 선택하여 `bitmap_scan_and_flip`을 통해 free인 page index를 얻고 bitmap 상에 free가 아닌 상태로 변경한다. 동시에 bitmap을 조작하는 일이 없도록 lock을 사용한다.
+`pool->base`를 더하고 page index에 `PGSIZE` 만큼 더하여 해당 page의 virtual address를 얻는다. 이후 flag에 따라 page를 0으로 초기화하거나 page를 얻지 못했을 때 panic한다.
+`palloc_get_page`는 내부적으로 `page_cnt=1`로 설정하여 해당 함수를 호출한다.
 
 ```c
 void
@@ -336,7 +381,10 @@ palloc_free_multiple (void *pages, size_t page_cnt)
   bitmap_set_multiple (pool->used_map, page_idx, page_cnt, false);
 }
 ```
+`palloc_get_multiple`의 반대작용으로 `page`의 `pool`을 판별한 뒤 해당 pool에서 `page`에 해당하는 bit를 false(free)로 설정한다.
+`palloc_free_page`는 내부적으로 `page_cnt=1`로 설정하여 해당 함수를 호출한다.
 
+User, Kernel Memory pool은 핀토스 내 코드에서 `palloc_get_page`를 통해 페이지를 할당할 때 사용한다. 이렇게 얻는 page들은 결국 각각 page 크기만큼의 서로 다른 physical memory 공간에 대응되며, pool의 bitmap을 통해 관리되므로 페이지가 free되지 않는 이상 같은 page, 같은 kernel virtual page를 절대로 할당/리턴 받을 수 없다. 그렇기에 `palloc`은 이름으로만 page allocator이고 실제로는 frame allocator와 유사한 의미로 작동하게 된다. 그렇기에 우리는 아래 디자인에서 `palloc`을 다른 allocator로 대체하여 frame 할당/해제를 제어하고 frame table을 제어하는 것이다.
 ### Limitations and Necessity
 현재 Pintos에는 `kernel virtual page - physical memory 매핑` 을 통해 frame 접근방식을 제공하고 `user virtual page`를  `kernel virtual page` 매핑(user virtual page table entry는 kernel virtual page table entry의 복사본 + user flag)하여 user virtual page가 간접적으로 frame을 할당 받을 수 있도록 하였다.
 이것이 frame과 관련된 구현의 전부로 frame(kernel virtual page)과 user virtual page 간의 매핑을 별도로 관리하지 않아 frame이 부족할 때 evict할 (user page - frame의 매핑을 끊을) page를 정하는데 어려움을 겪는다. 이를 개선하기 위해 어떤 Frame(kernel virtual page)이 어떤 Page(user virtual page)와 매핑되어 있는지를 관리하는 Frame Table이 필요하다.

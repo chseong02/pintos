@@ -393,7 +393,7 @@ enum falloc_flags
 | `FAL_ASSERT` | allocation 실패시 null 반환  | allocation 실패시 panic                                                    |
 | `FAL_ZERO`   |                         | page 0으로 초기화. `PAL_ZERO`에 대응.                                           |
 | `FAL_USER`   | page를 kernel pool에서 가져옴 | page를 user pool에서 가져옴. `PAL_USER`에 대응                                   |
-`falloc_get_page`는 모든 상황에서 `FAL_USER` flag가 함께하길 기대한다. 이번 프로젝트의 대부분 작업이 user virtual memory를 다루는 일이기 때문이다. 
+`falloc_get_page_w_page`는 모든 상황에서 `FAL_USER` flag가 함께하길 기대한다. 이번 프로젝트의 대부분 작업이 user virtual memory를 다루는 일이기 때문이다. 
 ```c
 void *
 falloc_get_frame_w_upage (enum falloc_flags, void* upage)
@@ -941,45 +941,85 @@ spte_delete(s_page_table_entry* spte)
 ## 4. Stack Growth
 ### Basics
 ```c
-static void
-init_thread (struct thread *t, const char *name, int priority)
+static bool
+setup_stack (void **esp) 
 {
-  enum intr_level old_level;
+  uint8_t *kpage;
+  bool success = false;
 
-  ASSERT (t != NULL);
-  ASSERT (PRI_MIN <= priority && priority <= PRI_MAX);
-  ASSERT (name != NULL);
-
-  memset (t, 0, sizeof *t);
-  t->status = THREAD_BLOCKED;
-  strlcpy (t->name, name, sizeof t->name);
-  t->stack = (uint8_t *) t + PGSIZE;
-  t->priority = priority;
-  t->magic = THREAD_MAGIC;
-
-  old_level = intr_disable ();
-  list_push_back (&all_list, &t->allelem);
-  intr_set_level (old_level);
-}
-
-```
-k
-```c
-static void *
-alloc_frame (struct thread *t, size_t size) 
-{
-  /* Stack data is always allocated in word-size units. */
-  ASSERT (is_thread (t));
-  ASSERT (size % sizeof (uint32_t) == 0);
-
-  t->stack -= size;
-  return t->stack;
+  kpage = palloc_get_page (PAL_USER | PAL_ZERO);
+  if (kpage != NULL) 
+    {
+      success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
+      if (success)
+        *esp = PHYS_BASE;
+      else
+        palloc_free_page (kpage);
+    }
+  return success;
 }
 ```
+user program을 load하는 `load`에서 `setup_stack`을 호출하여 user virtual memory의 가장 top(`PHYS_BASE`)에서 주소가 감소하는 방향으로 user stack을 위한 공간 page 하나를 할당한다.
+- `palloc_get_page (PAL_USER | PAL_ZERO)`를 통해 0으로 초기화된 user pool로부터 얻은 page를 할당 받는다. 이를 `install_page`를 통해 `PHYS_BASE-PGSIZE` user virtual address와 매핑한다.
+이후 `esp`에 stack의 top (`PHYS_BASE`)을 저장한다. 즉 user stack은 `PHYS_BASE`로부터 주소가 감소하는 방향으로 신장한다.
+하지만 user stack을 위한 공간은 `setup_stack`에서 정해진 뒤 변경되지 않는다.
 ### Limitations and Necessity
-
+user stack을 위한 공간은 처음 할당 받은 1 페이지에서 더 커지지 않는다. 그렇기에 만약 user stack이 길어져 처음 할당 받은 1페이지(4KB)을 넘어선다면 page fault를 발생하게 되고 현재 구현상 `sys_exit(-1)`을 통해 유저 프로세스를 종료하게 된다. 하지만 이는 page에 할당될 frame이 부족하여 생기는 문제가 아닌 단순히 user stack을 위한 공간이 1페이지로 한정되어 생기는 문제이다. 해당 문제는 user stack에 할당된 공간을 넘은 접근으로 인해 page fault가 발생시 user stack을 위한 공간을 이어서 더 할당함으로써 해결할 수 있다.
 
 ### Blueprint
+user stack의 공간 부족으로 인해 page fault 발생시 user stack을 위한 공간을 확장하기 위해서는 page fault 발생시 해당 page fault가 user stack의 공간 부족으로 인한 것임을 판별할 수 있어야 한다. 이를 위해 page fault handler `page_fault`에 다음을 추가한다.
+```c
+static void
+page_fault (struct intr_frame *f) 
+{
+  ...
+  /* User caused page fault */
+  if(is_valid_page(fault_addr) && load_frame_mapped_page(fault_addr))
+  {
+    pass
+  } 
+
++ if(fault_addr<PHYS_BASE && f->esp - 32 < fault_addr )
++ {
++   struct thread* t= thread_current();
++   void *kpage = falloc_get_page_w_upage(FAL_USER|FAL_ZERO, t->last_stack_page-PGSIZE);
++   if(!install_page(t->last_stack_page-PGSIZE,kpage,true))
++   {
++     falloc_free_page(kpage);
++   }
++   spte_create(..., t->last_stack_page-PGSIZE, kpage, ...);
++   t->last_stack_page = t->last_stack_page-PGSIZE;
++ }
++ else if(fault_addr<PHYS_BASE && t->esp - 32 < fault_addr)
++ {
++   //same to upward
++ }
+  else sys_exit(-1);
+```
+page fault를 일으킨 주소가 user virtual address에 있고 그 상황에 esp(`f->esp`)-32보다 fault_addr이 클 때 user stack 공간 부족으로 인한 page fault로 판별한다.
+- `80x86` 에서 stack에 값을 집어넣는 명령어는 `push`, `pusha`가 있는데 이는 각각 4바이트, 32바이트를 stack에 집어넣는다. 그렇기에 esp보다 최대 32까지 작을 수 있다.
+- 이 경우 `fallow_get_page_w_upage`를 통해 현재 스레드의 `last_stack_page` - `PGSIZE` (user virtual page)에 frame을 할당한다.
+	- `last_stack_page`는 해당 스레드의 user stack 용도로 마지막에 할당된 page의 시작 주소이다.
+- 이후 `install_page`를 통해 매핑한 뒤 Supplemental page table에 해당 page-frame에 대한 entry를 추가한다.
+- 마지막으로 `last_stack_page`를 현재 할당한 페이지 시작 주소로 변경한다.
+`f->esp`가 정의되지 않은 경우(처음으로 user->kernel mode 전환시)을 고려하기 위해 `t->esp`(현제 스레드의 `esp` 멤버)를 esp로 생각하여 동일한 과정으로 처리한다.
+- user->kernel mode 로 전환될 때 에러가 발생할 때만 `f->esp` 값을 설정한다.
+```c
+struct thread
+{
+#ifdef USERPROG
+    /* Owned by userprog/process.c. */
+    ...
++   void* last_stack_page;
++   void* esp;
+    ...
+#endif
+}
+```
+위의 `page_fault`에서는 `thread`의 새로운 멤버 `last_stack_page`와 `esp`를 사용한다.
+`thread->esp`은 timer interrupt의 tick마다 갱신해준다.?
+`last_stack_page`는 처음 user process의 초기화 중 `setup_stack`에서 초기화해주며, 이후 `page_fault`에서 새로운 stack page를 할당할 때마다 업데이트한다.
+
 
 
 ## 5. File Memory Mapping

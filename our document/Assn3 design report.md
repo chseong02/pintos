@@ -641,4 +641,63 @@ sys_munmap (mapid_t mapid)
 
 ## 6. Swap Table
 
+### Basics & Limitations and Necessity
+대량의 페이지를 할당해 사용할 경우 물리적 메모리가 부족해지는 상황이 생길 수 있는데, 현재 Pintos 구현에선 이러한 상황에서 추가로 페이지 할당을 시도할 시 별다른 처리 없이 실패하게 된다. 따라서 물리적 메모리가 모두 할당된 상황에서도 운영체제가 정상적으로 동작할 수 있도록 하기 위해선 자주 쓰이지 않는 페이지를 골라 할당 해제하거나 외부로 옮겨 여유 메모리를 확보해야 한다.
+
+이때 외부로 옮겨질 페이지들을 저장해놓을 공간을 사전에 디스크에 할당하여 사용할 수 있다. 페이지를 디스크 메모리에 저장하거나 (Swap out) 필요할 때 다시 메모리로 불러오는 (Swap in) 동작을 수행함으로써 물리적 메모리가 모자란 상황에서도 유연하게 메모리 할당 및 접근을 가능하게 한다. 이렇게 디스크 위에 할당한 저장공간을 **Swap Block**이라 하며, 이를 관리하는 테이블을 **Swap Table**이라고 한다.
+
+다만 이러한 동작은 모두 디스크 읽기 및 쓰기 동작을 수반하고, Swap이 끝나기 전까지는 해당 프로세스의 메모리 접근이 막히므로 빈번하게 일어날 시 큰 성능 저하로 이어질 수 있다. 따라서 어떤 페이지를 할당 해제할 지 선택하는 규칙인 **Page Replacement Policy**가 미래에 사용될 가능성이 가장 낮은 페이지를 우선으로 선택하도록 잘 구성해줘야 한다.
+
+### Blueprint
+Swap Block의 크기는 부팅 시 결정되기 때문에 변경되지 않고, 특정 위치의 페이지가 현재 할당중이었는지를 빠르게 알아내는 것이 중요하므로 `bitmap` 자료구조를 사용하는 것이 적합하다고 판단했다. Swap Block에 저장 가능한 페이지의 수는 `(Swap Block의 크기) / (페이지 크기)`로 계산 가능하므로, 해당 크기만큼의 비트를 가지는 비트맵을 할당하여 특정 비트의 값이 `0`인지 `1`인지로 해당 위치의 페이지 존재 여부를 알아낼 수 있다.
+- Swap block에 새로운 페이지를 저장하고자 할 때 저장 가능한 위치를 반환해줄 수 있어야 한다. 이는 현재 최대 페이지 수와 할당 해제된 인덱스를 관리하는 리스트를 이용하여 빠르게 반환하거나 비트맵 자료구조의 `bitmap_scan` 함수를 이용하여 처음으로 `0`이 등장하는 인덱스를 찾는 방법으로 구현 가능한데, 구현의 편의성을 위해 이번 프로젝트에선 후자를 선택할 예정이다.
+- 디스크 공간은 모든 프로세스에서 공유하기 때문에 Swap block은 운영체제 상에서 전역으로 선언되어 접근 가능해야 한다.
+
+현재 Evict하고자 하는 페이지가 일반적인 메모리 페이지인지, 혹은 앞서 살펴본 `mmap`에 의해 할당되어 특정 파일을 가리키고 있는 페이지인지에 따라서 Swap in과 Swap out의 동작이 달라진다. 현재 페이지가 메모리 페이지인지 파일 맵핑 페이지인지는 위에서 선언한 Supplemental Page Table Entry를 참조하여 구분할 수 있다.
+
+#### Swap out
+```c
+bool
+swap_out(struct s_page_table_entry *page)
+{
+  /* Validity check */
+
+  if(page->is_lazy)
+  {
+    /* File mapped page */
+    if(page->is_dirty)
+    {
+      /* Update data on disk file */
+    }
+    /* Free the page, no need to swap */
+  }
+  else
+  {
+    /* Memory page */
+    int idx = /* Get available swap table entry */
+    /* Copy page data to swap block */
+  }
+}
+```
+Swap out 동작은 위와 같이 구현할 수 있다.
+- 만약 `page`가 파일에 맵핑되어있어 `is_lazy` 플래그가 설정되어 있는 페이지라면 Swap block에 따로 데이터를 옮기지 않고 페이지를 해제해준다. 다만 `is_dirty` 플래그가 설정되어있어 파일에 수정사항이 있음을 나타낼 시 해당 데이터를 Swap block이 아닌 실제 파일에 적용시켜준다.
+- 일반적인 메모리 페이지라면 Swap table로부터 할당 가능한 인덱스를 하나 받아와 해당 위치에 페이지 정보를 복사한 뒤 페이지를 해제해준다.
+
+#### Swap in
+```c
+bool
+swap_in(struct s_page_table_entry *page, void *paddr)
+{
+  /* Validity check for paddr, page->swap_idx */
+
+  /* Memory page (File mapped page would not go here) */
+  /* Copy page data from swap block */
+  /* Unset swap table entry */
+}
+```
+Swap in 동작은 위와 같이 구현 가능하다. 파일 맵핑된 페이지는 Swap out되지 않으므로 메모리 페이지에 대해서만 구현을 해주면 되는데, 대상 Swap table entry와 페이지를 Swap in 하고자 하는 물리적 메모리 주소인 `paddr`에 대한 validity를 체크해준 후 디스크로부터 페이지 데이터를 복사해 메모리에 작성한다. 마지막으로 할당되어있던 Swap table entry의 비트를 `0`으로 바꿔줌으로써 할당을 해제한다.
+
+#### Page Replacement Policy
+물리적 메모리에 할당되어있는 frame entry 중 적절한 페이지를 찾아 Swap이 최대한 덜 일어나도록 페이지를 evict해야 하는데, frame table의 `use_flag`를 이용해 clock 알고리즘을 구현하여 효과적인 Page Replacement Policy를 구현할 계획이다.
+
 ## 7. On Process Termination

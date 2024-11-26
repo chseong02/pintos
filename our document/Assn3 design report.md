@@ -6,7 +6,7 @@ Team 37
 ### Basics
 Pintos는 Virtual Memory를 효율적으로 관리/구현하기 위해 Page와 이를 관리하기 위한 Page Directory, Page Table 등을 구현해두었다.
 #### Page
-pintos에서 주로 메모리를 관리할 때 사용하는 단위이다. Virtual Memory에서 Page를 논하게 되며 **Virtual Memory 4KB**이다. Virtual Memory는 Page 단위로 나누어져 할당 받거나 해제하는 등 관리된다. Virtual Memory 상 4KB를 페이지 하나로 생각하기 때문에 Virtual Address는 다음과 같이 해석된다.
+pintos에서 주로 메모리를 관리할 때 사용하는 단위이다. Virtual Memory 위의 연속된 메모리 공간 **4KB**를 의미하고, 모든 Virtual Memory는 Page 단위로 나누어져 할당 받거나 해제된다. Virtual Memory 상 4KB를 페이지 하나로 생각하기 때문에 Virtual Address는 다음과 같이 해석된다.
 ```c
    31               12 11        0
   +-------------------+-----------+
@@ -14,7 +14,7 @@ pintos에서 주로 메모리를 관리할 때 사용하는 단위이다. Virtua
   +-------------------+-----------+
 		   Virtual Address
 ```
-virtual address의 앞의 31~12비트(총 20비트)는 Page Number로, 뒤의 나머지 12비트는 offset으로 취급한다.  왜냐하면 Page는 Page-Aligned되어 있으며 Page가 4KB = $2^{12}$ Byte이기 때문이기에 주소의 하위 12비트가 표현하는 주소들은 모두 같은 페이지 내에 있기 때문이다. 또한 page number는 총 20비트로 1024 * 1024개의 page를 표현할 수 있으며 이는 각각 page directory, page table로 구성된다. 이에 대해 자세히 후술하겠다.
+virtual address의 MSB부터 20비트는 Page Number로, 나머지 12비트는 offset으로 취급한다. 왜냐하면 Page는 Page-Aligned되어 있으며 Page가 4KB = $2^{12}$ Byte이기 때문이기에 주소의 하위 12비트가 표현하는 주소들은 모두 같은 페이지 내에 있기 때문이다. 또한 page number는 총 20비트로 1024 * 1024개의 page를 표현할 수 있으며 이는 각각 page directory, page table로 구성된다. 이에 대해 자세히 후술하겠다.
 #### Page Directory, Page Table, Page Table Entry
 Pintos에서 Virtual Memory는 Page Directory, Page Table, Page Table Entry를 통해 구현된다.
 ```c
@@ -28,8 +28,10 @@ struct thread
 	...
   };
 ```
-모든 프로세스(스레드)는 각자의 Page Directory를 가지고 있으며 독립적으로 관리하게 된다. 위 `pagedir`은 Page Directory로 사용되게 할당 받은 페이지의 시작 주소(kernel virtual Address임)로, Page Directory 시작 위치이다. 추후 이 pagedir은 `pagedir_activate` in `userprog/pagedir.c`의 `asm volatile ("movl %0, %%cr3" : : "r" (vtop (pd)) : "memory");`를 통해 활성화되어 virtual address -> physical address의 변환 및 매핑을 설정하게 된다.
-Pintos의 Virtual Memory는 아래 구조처럼 구성되며 Virtual Address는 32bit로 표현되며 다음 구조를 가지고 있다.
+모든 프로세스(스레드)는 각자의 Page Directory를 가지고 있으며 독립적으로 관리하게 된다. 위 `pagedir`은 Page Directory로 사용되게 할당 받은 페이지의 시작 주소(kernel virtual Address임)로, Page Directory의 시작 위치이다. 추후 이 pagedir은 `pagedir_activate` in `userprog/pagedir.c`의 `asm volatile ("movl %0, %%cr3" : : "r" (vtop (pd)) : "memory");`를 통해 활성화되어 virtual address -> physical address의 변환 및 매핑을 설정하게 된다.
+
+Pintos의 Virtual Memory는 아래 구조처럼 구성되며 32bit Virtual Address는 다음 구조를 가지고 있다.
+
 Virtual Address는 Page Directory Index 10비트, Page Table Index 10비트, Page offset이 12비트로 이루어진다. 위에서 말한 것과 같이 Page Number가 총 20비트로 1024 * 1024 개의 page를 표현할 수 있는데 이를 Page Directory(1024 index), Page Table(1024)로 2단계로 구분하여 이와 같은 구조를 띄게 된 것이다. 
 ```c
  31                  22 21                  12 11                   0
@@ -60,14 +62,14 @@ Virtual Address는 Page Directory Index 10비트, Page Table Index 10비트, Pag
        0|____________|  \__\0|____________|  \____\|____________|
                            /                      /
 ```
-pintos는 각 스레드마다 각기 다른 page directory를 가지고 있고 독립적으로 관리한다. 이런 page direcotry는 1024개의 page directory entry를 가지며 각 entry는 32bit로 이루어진다.
+pintos는 각 스레드마다 각기 다른 page directory를 가지고 있고 독립적으로 관리한다. 이런 page directory는 1024개의 page directory entry를 가지며 각 entry는 32bit로 이루어진다.
 ```c
  31                                   12 11                2 1 0
 +---------------------------------------+----+----+-+-+---+-+-+-+
 |           Physical Address            |                 |U|W|P|
 +---------------------------------------+----+----+-+-+---+-+-+-+
 ```
-엔트리의 앞선 31~12bit는 각각 다른 page table의 시작 physical address의 31~12bit 부분을 담고 있다. 이 때 뒤의 12bit를 포함하지 않아도 되는 이유는 page table의 시작 위치가 4KB 정렬될 것이 보장되기 때문에 뒷 주소 12bit는 모두 0이기 때문이다. 이는 추후 나올 Page Table Entry에서도 동일하다. 하위 11~0 bit에는 page directory entry에 대한 flag들이 포함된다. 
+엔트리의 앞선 31~12bit는 각각 다른 page table의 시작 physical address의 31~12bit 부분을 담고 있다. 이 때 뒤의 12bit를 포함하지 않아도 되는 이유는 page table의 시작 위치가 4KB 단위로 allign되어 하위 12비트는 모두 0일 것이 보장되기 때문이다. 이는 추후 나올 Page Table Entry에서도 동일하다. 하위 11~0 bit에는 page directory entry에 대한 flag들이 포함된다. 
 ```c
 static inline uint32_t pde_create (uint32_t *pt) {
   ASSERT (pg_ofs (pt) == 0);
@@ -80,6 +82,7 @@ static inline uint32_t pde_create (uint32_t *pt) {
 | `PTE_U` | kernel만 접근 가능               | kernel, user 모두 접근 가능 |
 | `PTE_P` | PDE 존재X, 다른 flag 모두 의미 없어짐. | PDE 존재O, 유효           |
 | `PTE_W` | read-only                   | read/write 둘 다 가능     |
+
 `pde_create`는 주어진 page table을 가르키는 page directory entry를 생성하는 함수로 base page directory를 초기화하는 `paging_init`에서 kernel virtual memory에 대한 page를 초기화할 때 또는 `lookup_page`에서 virtual address에 대한 page table entry가 없을 때, 생성하는 도중 사용한다.
 ##### `pagedir_create` in `userprog/pagedir.c`
 ```c
@@ -154,7 +157,7 @@ static inline uint32_t pte_create_user (void *page, bool writable) {
 user virtual page에 대한 page table entry 생성은 `PTE_P`,`PTE_U`,`PTE_W` flag를 포함하게 된다.
 
 #### Frame
-pintos에서 **Physical Memory**를 관리할 때 사용하는 단위로 연속된 공간의 Physical Memory로, page와 동일하게 **4KB**이다. pintos에서 page는 관리하기 위해 page directory, page table 등 을 구현하고, 함수들의 반환 값으로 사용하는 등 빈번하게 사용되는 반면, frame은 `pagedir_set_page`와 `install_page` 등에서 간접적으로 언급되는 것을 제외하고는 직접적으로 언급되지 않는다. 그대신 `kernel page와 user page의 매핑`이라는 용어를 통해 사용된다.
+pintos에서 **Physical Memory**를 관리할 때 사용하는 단위이다. 연속된 공간의 Physical Memory로, page와 동일하게 **4KB**이다. pintos에서 page는 관리하기 위해 page directory, page table 등 을 구현하고, 함수들의 반환 값으로 사용하는 등 빈번하게 사용되는 반면, frame은 `pagedir_set_page`와 `install_page` 등에서 간접적으로 언급되는 것을 제외하고는 직접적으로 언급되지 않는다. 그대신 `kernel page와 user page의 매핑`이라는 용어를 통해 사용된다.
 ```c
    31               12 11        0
   +-------------------+-----------+
@@ -164,7 +167,7 @@ pintos에서 **Physical Memory**를 관리할 때 사용하는 단위로 연속�
 ```
 Physical Address는 앞의 20비트(31~12)는 Frame Number를, 나머지 뒤의 12비트(11 ~ 0)은 Frame 내 offset을 의미한다. 이는 virtual address & page와 유사하게 physical memory 상에서 frame이 frame-aligned 되어있으며 frame이 4KB이기 때문이다.
 
-80x86 프로세서는 단순히 Physical Address를 통해 메모리에 접근하는 방법을 제공하지 않는다. Pintos에서는 이를 kernel virtual memory와 physical memory를 direct mapping하여 간접적으로 방법을 제공한다. 즉 kernel virtual memory의 첫 page는 physical memory의 첫 frame과 매칭된다. kernel virtual memory는 Virtual Memory 상에서 `PHYS_BASE(0xc0000000)`부터 시작하기에 Kernel Virtual Memory 0xc0000000은 physcial Address 0x00000000에 대응된다고 할 수 있다. 
+80x86 프로세서는 단순히 Physical Address를 통해 메모리에 접근하는 방법을 제공하지 않는다. Pintos에서는 이를 kernel virtual memory와 physical memory를 direct mapping하여 간접적으로 방법을 제공한다. 즉 kernel virtual memory의 첫 page는 physical memory의 첫 frame과 매칭된다. kernel virtual memory는 Virtual Memory 상에서 `PHYS_BASE(0xc0000000)`부터 시작하기에 Kernel Virtual Memory `0xc0000000`은 physcial Address `0x00000000`에 대응된다고 할 수 있다. 
 ```c
 // In threads/vaddr.h
 static inline void *
@@ -349,7 +352,7 @@ palloc_get_multiple (enum palloc_flags flags, size_t page_cnt)
   return pages;
 }
 ```
-`PAL_USER`flag에 따라 올바른 pool을 선택하여 `bitmap_scan_and_flip`을 통해 free인 page index를 얻고 bitmap 상에 free가 아닌 상태로 변경한다. 동시에 bitmap을 조작하는 일이 없도록 lock을 사용한다.
+`PAL_USER` flag에 따라 올바른 pool을 선택하여 `bitmap_scan_and_flip`을 통해 free인 page index를 얻고 bitmap 상에 free가 아닌 상태로 변경한다. 동시에 bitmap을 조작하는 일이 없도록 lock을 사용한다.
 `pool->base`를 더하고 page index에 `PGSIZE` 만큼 더하여 해당 page의 virtual address를 얻는다. 이후 flag에 따라 page를 0으로 초기화하거나 page를 얻지 못했을 때 panic한다.
 `palloc_get_page`는 내부적으로 `page_cnt=1`로 설정하여 해당 함수를 호출한다.
 
@@ -441,6 +444,7 @@ enum falloc_flags
 | `FAL_ASSERT` | allocation 실패시 null 반환  | allocation 실패시 panic                                                    |
 | `FAL_ZERO`   |                         | page 0으로 초기화. `PAL_ZERO`에 대응.                                           |
 | `FAL_USER`   | page를 kernel pool에서 가져옴 | page를 user pool에서 가져옴. `PAL_USER`에 대응                                   |
+
 `falloc_get_page_w_page`는 모든 상황에서 `FAL_USER` flag가 함께하길 기대한다. 이번 프로젝트의 대부분 작업이 user virtual memory를 다루는 일이기 때문이다. 
 ```c
 void *
@@ -693,7 +697,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 기존 `load_segment`함수를 다음과 같이 변경한다. 
 - 기존 대비 삭제한 코드는 주석 처리, 추가한 코드는 `+` 표시를 해두었다.
 - 기존에는 file_read를 통해 file 내 보고 있는 위치가 자동으로 변경되었으나 변경 후에는 lazy loading을 적용하여 당장 `file_read`를 사용하지 않기에 `i`를 이용해 while 문을 돌 때마다 읽어야 할 file 내 위치를 조작해준다.
-- 또한 `palloc_get_page`,`palloc_free_page`,`install_page` 등의 frame/page 할당, user virtual page <-> kernel virtual page(frame) 매핑 추가 등의 코드를 모두 삭제한다.
+- 또한 `palloc_get_page`, `palloc_free_page`, `install_page` 등의 frame/page 할당, user virtual page <-> kernel virtual page(frame) 매핑 추가 등의 코드를 모두 삭제한다.
 	- 추후 page fault 발생시 실제로 load할 때 해당 코드를 사용하게 된다.
 	- 대신 `spte_create`를 통해 segment가 추후 실제로 로드될 user virtual page(frame 매핑이 없음.)를 할당한다.  
 ```c
@@ -1065,7 +1069,7 @@ struct thread
 }
 ```
 위의 `page_fault`에서는 `thread`의 새로운 멤버 `last_stack_page`와 `esp`를 사용한다.
-`thread->esp`은 timer interrupt의 tick마다 갱신해준다.?
+`thread->esp`은 timer interrupt의 tick마다 갱신해준다.
 `last_stack_page`는 처음 user process의 초기화 중 `setup_stack`에서 초기화해주며, 이후 `page_fault`에서 새로운 stack page를 할당할 때마다 업데이트한다.
 
 

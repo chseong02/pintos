@@ -1145,3 +1145,21 @@ Swap in 동작은 위와 같이 구현 가능하다. 파일 맵핑된 페이지�
 물리적 메모리에 할당되어있는 frame entry 중 적절한 페이지를 찾아 Swap이 최대한 덜 일어나도록 페이지를 evict해야 하는데, frame table의 `use_flag`를 이용해 clock 알고리즘을 구현하여 효과적인 Page Replacement Policy를 구현할 계획이다.
 
 ## 7. On Process Termination
+
+### Basics & Limitations and Necessity
+프로세스가 종료된 뒤 동적할당했던 메모리 및 자원들을 제대로 반환해주지 않을 시 메모리 누수로 이어질 수 있기 때문에 빠짐없이 해제해줘야 한다. Pintos Project 2 종료 시점 기준으로 프로세스 종료 시 메모리 누수를 검사하는 테스트케이스가 있었고 이를 통과했으므로 현재는 메모리 누수가 없는 상황이지만, 이번 Project 3에서 추가로 할당한 메모리들에 대해서는 추가적으로 할당 해제해주는 과정이 필요하다.
+
+### Blueprint
+```c
+void
+sys_exit (int status)
+{
+  ...
+  /* Call sys_munmap for all mapped file */
+  /* Free SPT and following entries */
+  /* Free Swap table and pages */
+  /* Write to the disk when dirty bit is set */
+  ...
+}
+```
+프로세스가 종료될 때의 동작은 Project 2와 마찬가지로 `sys_exit`에서 구현한다. `mmap`으로 맵핑한 모든 파일을 `munmap`으로 다시 해제해줘야 하고, SPT와 그 엔트리들, Swap table까지 모두 할당 해제해줘야 한다. 페이지를 해제하는 중 dirty bit가 설정되어있을 시 해제하기 전 데이터의 변경 사항을 디스크에 반영해줘야 한다.

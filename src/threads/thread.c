@@ -11,6 +11,7 @@
 #include "threads/switch.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
+#include "devices/timer.h"
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
@@ -150,6 +151,46 @@ thread_print_stats (void)
           idle_ticks, kernel_ticks, user_ticks);
 }
 
+/* Compares priority of thread a and b, return true if priority
+   of a is smaller than b. */
+bool
+compare_thread_priority(const struct list_elem *a,
+                             const struct list_elem *b,
+                             void *aux UNUSED)
+{
+  return list_entry(a, struct thread, elem)->priority
+  < list_entry(b, struct thread, elem)->priority;
+}
+
+/* Compares priority of thread a and b, return true if priority
+   of a is smaller than b. */
+bool
+compare_donation_priority(const struct list_elem *a,
+                             const struct list_elem *b,
+                             void *aux UNUSED)
+{
+  return list_entry(a, struct thread, donation_elem)->priority
+  < list_entry(b, struct thread, donation_elem)->priority;
+}
+
+/* Checks if the priority of current thread is lower than the
+   largest one in the ready list. If it's true, thread should
+   be yielded. */
+void
+thread_preempt (void)
+{
+  if(list_empty(&ready_list)) return;
+  if(thread_current()->priority < list_entry(
+    list_max(&ready_list, compare_thread_priority, NULL), 
+    struct thread, elem)->priority){
+      if(intr_context())
+        intr_yield_on_return();
+      else
+        thread_yield();
+      
+  }
+}
+
 /* Creates a new kernel thread named NAME with the given initial
    PRIORITY, which executes FUNCTION passing AUX as the argument,
    and adds it to the ready queue.  Returns the thread identifier
@@ -203,6 +244,10 @@ thread_create (const char *name, int priority,
 
   /* Add to run queue. */
   thread_unblock (t);
+
+  /* Try to yield if the priority of current thread is not
+  the largest one */
+  thread_preempt();
 
   return tid;
 }
@@ -385,7 +430,11 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
-  thread_current ()->priority = new_priority;
+  thread_current ()->base_priority = new_priority;
+  thread_update_priority();
+  /* Try to yield if the priority of current thread is not
+  the largest one */
+  thread_preempt();
 }
 
 /* Returns the current thread's priority. */
@@ -515,6 +564,10 @@ init_thread (struct thread *t, const char *name, int priority)
   t->priority = priority;
   t->magic = THREAD_MAGIC;
 
+  t->lock_to_acquire = NULL;
+  list_init(&t->donors);
+  t->base_priority = priority;
+
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
   intr_set_level (old_level);
@@ -544,7 +597,11 @@ next_thread_to_run (void)
   if (list_empty (&ready_list))
     return idle_thread;
   else
-    return list_entry (list_pop_front (&ready_list), struct thread, elem);
+    /* choose a thread with maximum priority and pop it from 
+    ready_list */
+    return list_entry (
+      list_pop_max (&ready_list, compare_thread_priority, NULL), 
+      struct thread, elem);
 }
 
 /* Completes a thread switch by activating the new thread's page
@@ -629,6 +686,39 @@ allocate_tid (void)
 
   return tid;
 }
+
+/* Performs a nested priority donation from current thread. */
+void
+nested_donation(void)
+{
+  struct thread *current = thread_current();
+  for(int iter = 0; iter < MAX_NEST_DEPTH; iter++){
+    if(current->lock_to_acquire == NULL) break;
+    current->lock_to_acquire->holder->priority = current->priority;
+    current = current->lock_to_acquire->holder;
+  }
+}
+
+void
+thread_update_priority(void)
+{
+  struct thread *current = thread_current();
+  int base = current->base_priority;
+  int max_priority_in_donors = PRI_MIN;
+  if(!list_empty(&current->donors)){
+    max_priority_in_donors = list_entry(
+      list_max(
+        &current->donors, 
+        compare_donation_priority, 
+        NULL), 
+      struct thread, 
+      donation_elem)->priority;
+  }
+
+  current->priority = base > max_priority_in_donors ? base 
+                    : max_priority_in_donors;
+}
+
 
 /* Offset of `stack' member within `struct thread'.
    Used by switch.S, which can't figure it out on its own. */

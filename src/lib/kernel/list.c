@@ -522,3 +522,25 @@ list_min (struct list *list, list_less_func *less, void *aux)
     }
   return min;
 }
+
+/* Removes the element in LIST with the largest value according
+  to LESS and returns it. Undefined behavior if LIST is empty 
+  before removal. */
+struct list_elem *
+list_pop_max (struct list *list, list_less_func *less, void *aux)
+{
+  struct list_elem *max = list_max (list, less, aux);
+  list_remove (max);
+  return max;
+}
+
+/* Removes the element in LIST with the smallest value according
+  to LESS and returns it. Undefined behavior if LIST is empty 
+  before removal. */
+struct list_elem *
+list_pop_min (struct list *list, list_less_func *less, void *aux)
+{
+  struct list_elem *min = list_min (list, less, aux);
+  list_remove (min);
+  return min;
+}

@@ -4,6 +4,7 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+#include "threads/fixed-point.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -92,6 +93,10 @@ struct thread
     uint8_t *stack;                     /* Saved stack pointer. */
     int priority;                       /* Priority. */
     int64_t wake_up_tick; /* Tick time thread need to wake up */
+
+
+    int nice;                           /* Nice (for MLFQS) */
+    fp32 recent_cpu;                    /* The CPU ticks recently used by the thread. */
     struct list_elem allelem;           /* List element for all threads list. */
 
     /* Shared between thread.c and synch.c. */
@@ -153,6 +158,7 @@ int thread_get_nice (void);
 void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
+void thread_mlfqs_tick (int64_t);
 
 bool compare_thread_priority(const struct list_elem *a,
                              const struct list_elem *b,

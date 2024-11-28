@@ -211,6 +211,10 @@ static void
 timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
+
+  // mlfqs related info update
+  if(thread_mlfqs)
+    thread_mlfqs_tick (ticks);
   thread_tick ();
 }
 

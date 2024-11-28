@@ -60,6 +60,11 @@ static unsigned thread_ticks;   /* # of timer ticks since last yield. */
    Controlled by kernel command-line option "-o mlfqs". */
 bool thread_mlfqs;
 
+/* BSD Scheduler */
+/* Average number of threads that were in the "ready" and "running" states 
+   over the past minute. */
+static fp32 load_avg;
+
 static void kernel_thread (thread_func *, void *aux);
 
 static void idle (void *aux UNUSED);
@@ -71,6 +76,10 @@ static void *alloc_frame (struct thread *, size_t size);
 static void schedule (void);
 void thread_schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
+
+static int thread_refresh_mlfqs_priority (struct thread *);
+static void refresh_load_avg (void);
+static void refresh_recent_cpu (struct thread *);
 
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
@@ -446,33 +455,112 @@ thread_get_priority (void)
 
 /* Sets the current thread's nice value to NICE. */
 void
-thread_set_nice (int nice UNUSED) 
+thread_set_nice (int nice) 
 {
-  /* Not yet implemented. */
+  enum intr_level old_level;
+  old_level = intr_disable ();
+
+  struct thread *cur = thread_current ();
+  int priority;
+  int first_ready_priority;
+  cur->nice = nice;
+  priority = thread_refresh_mlfqs_priority(cur);
+  first_ready_priority = list_entry (list_max (&ready_list, compare_thread_priority, NULL), 
+    struct thread, elem)->priority;
+  if(priority < first_ready_priority){
+    thread_yield();
+  }
+  intr_set_level (old_level);
 }
 
+/* Update priority of the received thread based on MLFQS */
+static int
+thread_refresh_mlfqs_priority (struct thread *t)
+{ 
+  int nice = t->nice;
+  fp32 recent_cpu = t->recent_cpu;
+  t->priority = PRI_MAX - FP32_TO_INT(FP32_INT_DIV(recent_cpu, 4)) - nice * 2;
+  return t->priority;
+}
 /* Returns the current thread's nice value. */
 int
 thread_get_nice (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  return thread_current ()->nice;
 }
 
 /* Returns 100 times the system load average. */
 int
 thread_get_load_avg (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  return FP32_TO_INT_ROUND(FP32_INT_MUL (load_avg, 100));
 }
 
 /* Returns 100 times the current thread's recent_cpu value. */
 int
 thread_get_recent_cpu (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  return FP32_TO_INT_ROUND(FP32_INT_MUL(thread_current ()->recent_cpu, 100));
+}
+
+/* Updates variables related to MLFQS such as recent_cpu, load_avg, priority */
+void
+thread_mlfqs_tick (int64_t ticks)
+{
+  enum intr_level old_level = intr_disable ();
+
+  struct thread *cur = thread_current ();
+
+  /* idle thread must not update recent_cpu */
+  if(cur != idle_thread)
+    cur->recent_cpu = FP32_INT_ADD(cur->recent_cpu, 1);
+
+  /* update mlfqs priority per 4 ticks */
+  if(ticks % 4 == 0)
+  {
+    thread_foreach (thread_refresh_mlfqs_priority, 0);
+  }
+
+  /* update load_avg, recent_cpu priority per 1 second */
+  if(ticks % TIMER_FREQ == 0)
+  {
+    refresh_load_avg ();
+    thread_foreach (refresh_recent_cpu, 0);
+  }
+
+  intr_set_level (old_level);
+}
+
+/* update load_avg */
+static void
+refresh_load_avg ()
+{
+  ASSERT (intr_get_level () == INTR_OFF);
+
+  fp32 load_avg_ratio;
+  fp32 ready_threads_ratio;
+  fp32 load_avg_part;
+  fp32 ready_threads_part;
+  int ready_threads_number;
+  ready_threads_number = list_size (&ready_list) + (thread_current()!=idle_thread?1:0);
+  load_avg_ratio = FP32_INT_DIV (FP32_TO_FP(59), 60);
+  ready_threads_ratio = FP32_INT_DIV (FP32_TO_FP(1), 60);
+  load_avg_part = FP32_FP32_MUL (load_avg_ratio, load_avg);
+  ready_threads_part = FP32_INT_MUL (ready_threads_ratio, ready_threads_number);
+
+  load_avg = FP32_FP32_ADD (load_avg_part, ready_threads_part);
+}
+
+/* update recent_cpu of the received thread t */
+static void
+refresh_recent_cpu (struct thread *t)
+{
+  ASSERT (intr_get_level () == INTR_OFF);
+
+  fp32 coefficient;
+  coefficient = FP32_INT_MUL (load_avg, 2);
+  coefficient = FP32_FP32_DIV (coefficient, FP32_INT_ADD(coefficient, 1));
+  t->recent_cpu = FP32_INT_ADD (FP32_FP32_MUL(coefficient, t->recent_cpu), t->nice);
 }
 
 /* Idle thread.  Executes when no other thread is ready to run.
@@ -562,6 +650,14 @@ init_thread (struct thread *t, const char *name, int priority)
   t->stack = (uint8_t *) t + PGSIZE; 
   t->wake_up_tick = 0;
   t->priority = priority;
+
+  if (thread_mlfqs)
+  {
+    t->nice = 0;
+    t->recent_cpu = 0;
+    thread_refresh_mlfqs_priority (t);
+  }
+
   t->magic = THREAD_MAGIC;
 
   t->lock_to_acquire = NULL;

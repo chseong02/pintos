@@ -134,6 +134,9 @@ thread_tick (void)
   else
     kernel_ticks++;
 
+  /* Check the thread that needs to wake up. */
+  check_wake_up();
+
   /* Enforce preemption. */
   if (++thread_ticks >= TIME_SLICE)
     intr_yield_on_return ();
@@ -225,8 +228,10 @@ thread_create_with_pcb (const char *name, int priority, struct process* p_ptr,
   init_thread (t, name, priority);
   tid = t->tid = allocate_tid ();
 
+#ifdef USERPROG
   t->process_ptr = p_ptr;
   t->process_ptr->tid=tid;
+#endif
 
   /* Stack frame for kernel_thread(). */
   kf = alloc_frame (t, sizeof *kf);
@@ -505,7 +510,8 @@ init_thread (struct thread *t, const char *name, int priority)
   memset (t, 0, sizeof *t);
   t->status = THREAD_BLOCKED;
   strlcpy (t->name, name, sizeof t->name);
-  t->stack = (uint8_t *) t + PGSIZE;
+  t->stack = (uint8_t *) t + PGSIZE; 
+  t->wake_up_tick = 0;
   t->priority = priority;
   t->magic = THREAD_MAGIC;
 

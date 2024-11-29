@@ -16,7 +16,7 @@ struct frame_table_entry
 };
 
 void
-frame_table_init(void)
+frame_table_init (void)
 {
     list_init(&frame_table);
 }

@@ -19,6 +19,7 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "lib/user/syscall.h"
+#include "vm/s-page-table.h"
 
 /*---------------------------------------------------------------------------*/
 /* Process Control Block */
@@ -428,6 +429,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
   /* Allocate and activate page directory. */
   t->pagedir = pagedir_create ();
+  init_s_page_table();
   if (t->pagedir == NULL) 
     goto done;
   process_activate ();

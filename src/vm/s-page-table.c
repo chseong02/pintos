@@ -28,9 +28,11 @@ struct s_page_table_entry
 };
 
 void
-init_s_page_table (struct hash* s_page_table)
+init_s_page_table (void)
 {
-    hash_init (s_page_table, s_page_table_hash_func, s_page_table_hash_less_func, NULL);
+    struct thread *thread = thread_current ();
+    hash_init (&thread->s_page_table, s_page_table_hash_func, 
+        s_page_table_hash_less_func, NULL);
 }
 
 static unsigned
@@ -58,8 +60,8 @@ s_page_table_add (bool is_lazy, struct file *file, off_t file_ofs,
     if (!entry)
         return false;
 
-    // TODO: Check Is Exist upage 
-    // and return result
+    if (find_s_page_table_entry_from_upage (upage))
+        return false;
 
     struct thread *thread = thread_current ();
     entry->present = true;

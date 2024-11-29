@@ -87,6 +87,27 @@ s_page_table_add (bool is_lazy, struct file *file, off_t file_ofs,
     return true;
 }
 
+bool
+s_page_table_binded_add (void *upage, void *kpage, bool writable)
+{
+    return s_page_table_add (false, NULL, 0, writable, upage, kpage, 0, 0, 0);
+}
+
+bool
+s_page_table_file_add (void *upage, bool writable, struct file *file, 
+	off_t file_ofs, uint32_t file_read_bytes, uint32_t file_zero_bytes, 
+	enum falloc_flags flags)
+{
+    return s_page_table_add (true, file, file_ofs, writable, upage, NULL, 
+        file_read_bytes, file_zero_bytes, flags);
+}
+
+bool
+s_page_table_lazy_add (void *upage, bool writable, enum falloc_flags flags)
+{
+    return s_page_table_add (true, NULL, 0, writable, upage, NULL, 0, 0, flags);
+}
+
 static struct s_page_table_entry*
 find_s_page_table_entry_from_upage (void* upage)
 {

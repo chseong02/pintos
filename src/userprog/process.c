@@ -15,7 +15,6 @@
 #include "threads/init.h"
 #include "threads/interrupt.h"
 #include "threads/palloc.h"
-#include "vm/frame-table.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "lib/user/syscall.h"
@@ -635,7 +634,12 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
           falloc_free_frame_from_frame (kpage);
           return false; 
         }
-
+      // TODO: 추후 `s_page_table_file_add`를 이용한 lazy loading을 변경해야 함.
+      if (!s_page_table_binded_add(upage, kpage, writable))
+        {
+          falloc_free_frame_from_frame (kpage);
+          return false;  
+        }
       /* Advance. */
       read_bytes -= page_read_bytes;
       zero_bytes -= page_zero_bytes;
@@ -658,7 +662,8 @@ setup_stack (void **esp)
   kpage = falloc_get_frame_w_upage (FAL_USER | FAL_ZERO, upage);
   if (kpage != NULL) 
     {
-      success = install_page (upage, kpage, true);
+      success = install_page (upage, kpage, true) && 
+        s_page_table_binded_add(upage, kpage, true);
       if (success)
         *esp = PHYS_BASE;
       else

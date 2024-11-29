@@ -61,7 +61,7 @@ falloc_get_frame_w_upage (enum falloc_flags flags, void *upage)
     list_push_back (&frame_table, &entry->elem);
 }
 
-struct frame_table_entry*
+static struct frame_table_entry*
 find_frame_table_entry_from_upage (void *upage)
 {
     struct list_elem *e;
@@ -76,7 +76,7 @@ find_frame_table_entry_from_upage (void *upage)
     return NULL;
 }
 
-struct frame_table_entry*
+static struct frame_table_entry*
 find_frame_table_entry_from_frame (void *frame)
 {
     struct list_elem *e;

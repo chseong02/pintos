@@ -60,7 +60,7 @@ s_page_table_add (bool is_lazy, struct file *file, off_t file_ofs,
 
     // TODO: Check Is Exist upage 
     // and return result
-    
+
     struct thread *thread = thread_current ();
     entry->present = true;
     entry->in_swap = false;
@@ -84,3 +84,18 @@ s_page_table_add (bool is_lazy, struct file *file, off_t file_ofs,
 
     return true;
 }
+
+static struct s_page_table_entry*
+find_s_page_table_entry_from_upage (void* upage)
+{
+	struct s_page_table_entry entry;
+    struct thread *thread = thread_current ();
+
+	entry.upage = upage;
+    
+	struct hash_elem *finded_elem = hash_find(&thread->s_page_table, &entry.elem);
+	if (!finded_elem)
+		return NULL;
+	return hash_entry (finded_elem, struct s_page_table_entry, elem);
+}
+

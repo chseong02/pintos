@@ -60,3 +60,18 @@ falloc_get_frame_w_upage (enum falloc_flags flags, void *upage)
     entry->use_flag = false;
     list_push_back (&frame_table, &entry->elem);
 }
+
+struct frame_table_entry*
+find_frame_table_entry_from_upage(void *upage)
+{
+    struct list_elem *e;
+    for (e = list_begin (&frame_table); e != list_end (&frame_table); 
+        e = list_next (e))
+    {
+        struct frame_table_entry *entry = 
+            list_entry (e, struct frame_table_entry, elem);
+        if (entry->upage == upage)
+            return entry;
+    }
+    return NULL;
+}

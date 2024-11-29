@@ -1,5 +1,7 @@
 #include "vm/frame-table.h"
 #include "threads/thread.h"
+#include "threads/palloc.h"
+#include "threads/malloc.h"
 #include <list.h>
 
 static struct list frame_table;
@@ -12,3 +14,49 @@ struct frame_table_entry
     bool use_flag;
     struct list_elem elem;
 };
+
+void
+frame_table_init()
+{
+    list_init(&frame_table);
+}
+
+void*
+falloc_get_frame_w_upage (enum falloc_flags flags, void *upage)
+{
+    void *kpage;
+    struct frame_table_entry *entry;
+    enum palloc_flags _palloc_flags = 000;
+
+    if (flags & FAL_ZERO)
+        _palloc_flags |= PAL_ZERO;
+    if (flags & FAL_USER)
+        _palloc_flags |= PAL_USER;
+
+    kpage = palloc_get_page (_palloc_flags);
+    if (!kpage)
+    {
+        //TODO: evict policy
+        // evict_policy();
+        if (flags & FAL_ASSERT)
+            _palloc_flags |= PAL_ASSERT;
+        kpage = palloc_get_page (_palloc_flags);
+        if (!kpage)
+            return kpage;
+    }
+
+    entry = malloc (sizeof *entry);
+    if (!entry)
+    {
+        palloc_free_page (kpage);
+        if (flags & FAL_ASSERT)
+            PANIC ("NO Memory for Frame Table Entry!");
+        return NULL;
+    }
+
+    entry->tid = thread_current()->tid;
+    entry->upage = upage;
+    entry->kpage = kpage;
+    entry->use_flag = false;
+    list_push_back (&frame_table, &entry->elem);
+}

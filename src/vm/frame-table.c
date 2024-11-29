@@ -75,3 +75,17 @@ find_frame_table_entry_from_upage(void *upage)
     }
     return NULL;
 }
+struct frame_table_entry*
+find_frame_table_entry_from_frame(void *frame)
+{
+    struct list_elem *e;
+    for (e = list_begin (&frame_table); e != list_end (&frame_table); 
+        e = list_next (e))
+    {
+        struct frame_table_entry *entry = 
+            list_entry (e, struct frame_table_entry, elem);
+        if (entry->kpage == frame)
+            return entry;
+    }
+    return NULL;
+}

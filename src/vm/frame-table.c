@@ -59,6 +59,7 @@ falloc_get_frame_w_upage (enum falloc_flags flags, void *upage)
     entry->kpage = kpage;
     entry->use_flag = false;
     list_push_back (&frame_table, &entry->elem);
+    return kpage;
 }
 
 static struct frame_table_entry*

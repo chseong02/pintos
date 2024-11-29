@@ -23,7 +23,7 @@ struct s_page_table_entry
 void
 init_s_page_table (struct hash* s_page_table)
 {
-    //hash_init (s_page_table, )
+    hash_init (s_page_table, s_page_table_hash_func, s_page_table_hash_less_func, NULL);
 }
 
 unsigned

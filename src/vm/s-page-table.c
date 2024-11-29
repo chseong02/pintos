@@ -27,6 +27,11 @@ struct s_page_table_entry
 	struct hash_elem elem;
 };
 
+static unsigned s_page_table_hash_func (const struct hash_elem *, void *);
+static bool s_page_table_hash_less_func (const struct hash_elem *, 
+    const struct hash_elem *, void *);
+static struct s_page_table_entry* find_s_page_table_entry_from_upage (void *);
+
 void
 init_s_page_table (void)
 {

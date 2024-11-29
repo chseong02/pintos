@@ -23,3 +23,9 @@ struct s_page_table_entry
 	enum falloc_flags flags;
 	struct hash_elem elem;
 };
+
+void init_s_page_table (struct hash *s_page_table);
+bool s_page_table_add (bool is_lazy, struct file *file, off_t file_ofs, 
+	bool writable, void *upage, void *kpage, uint32_t file_read_bytes, 
+	uint32_t file_zero_bytes, enum falloc_flags flags);
+void s_page_table_delete_from_upage (void *upage);

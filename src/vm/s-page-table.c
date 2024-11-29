@@ -20,5 +20,25 @@ struct s_page_table_entry
 	struct hash_elem elem;
 };
 
-static struct list frame_table;
+void
+init_s_page_table (struct hash* s_page_table)
+{
+    //hash_init (s_page_table, )
+}
+
+unsigned
+s_page_table_hash_func (const struct hash_elem *e, void *aux)
+{
+	struct s_page_table_entry *entry = hash_entry (e, struct s_page_table_entry, elem);
+	return hash_bytes (&entry->upage, 32);
+}
+
+bool
+s_page_table_hash_less_func (const struct hash_elem *a, 
+    const struct hash_elem *b, void *aux)
+{
+	struct s_page_table_entry *_a = hash_entry(a, struct s_page_table_entry, elem);
+	struct s_page_table_entry *_b = hash_entry(b, struct s_page_table_entry, elem);
+	return _a->upage < _b->upage;
+}
 

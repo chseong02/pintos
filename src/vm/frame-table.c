@@ -62,7 +62,7 @@ falloc_get_frame_w_upage (enum falloc_flags flags, void *upage)
 }
 
 struct frame_table_entry*
-find_frame_table_entry_from_upage(void *upage)
+find_frame_table_entry_from_upage (void *upage)
 {
     struct list_elem *e;
     for (e = list_begin (&frame_table); e != list_end (&frame_table); 
@@ -75,8 +75,9 @@ find_frame_table_entry_from_upage(void *upage)
     }
     return NULL;
 }
+
 struct frame_table_entry*
-find_frame_table_entry_from_frame(void *frame)
+find_frame_table_entry_from_frame (void *frame)
 {
     struct list_elem *e;
     for (e = list_begin (&frame_table); e != list_end (&frame_table); 
@@ -88,4 +89,28 @@ find_frame_table_entry_from_frame(void *frame)
             return entry;
     }
     return NULL;
+}
+
+void
+falloc_free_frame_from_upage (void *upage)
+{
+    struct frame_table_entry *entry = find_frame_table_entry_from_upage (upage);
+    if (!entry)
+        return;
+    
+    list_remove (&entry->elem);
+    palloc_free_page (entry->kpage);
+    free (entry);
+}
+
+void
+falloc_free_frame_from_frame (void *frame)
+{
+    struct frame_table_entry *entry = find_frame_table_entry_from_frame (frame);
+    if (!entry)
+        return;
+    
+    list_remove (&entry->elem);
+    palloc_free_page (entry->kpage);
+    free (entry);  
 }

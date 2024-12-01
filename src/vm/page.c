@@ -1,8 +1,9 @@
 #include "vm/page.h"
 #include "vm/s-page-table.h"
 #include "vm/frame-table.h"
+#include "userprog/process.h"
 
-void* find_page_from_uvaddr (void *uaddr)
+void* find_page_from_uaddr (void *uaddr)
 {
     void *upage = (uint32_t) uaddr & 0xFFFFF000;
     struct s_page_table_entry *entry = find_s_page_table_entry_from_upage (upage);
@@ -42,7 +43,7 @@ bool make_page_binded (void *upage)
         /* Load this page. */
         if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
         {
-            falloc_free_page (kpage);
+            falloc_free_frame_from_frame (kpage);
             return false; 
         }
         memset (kpage + page_read_bytes, 0, page_zero_bytes);
@@ -50,7 +51,7 @@ bool make_page_binded (void *upage)
         /* Add the page to the process's address space. */
         if (!install_page (upage, kpage, writable)) 
         {
-            falloc_free_page (kpage);
+            falloc_free_frame_from_frame (kpage);
             return false; 
         }
         return true;

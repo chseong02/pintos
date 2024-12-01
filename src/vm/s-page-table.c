@@ -2,35 +2,9 @@
 #include "threads/malloc.h"
 #include "threads/thread.h"
 
-struct s_page_table_entry 
-{
-	bool present;
-	bool in_swap;
-    bool is_lazy;
-	bool has_loaded;
-
-	bool writable;
-	bool is_dirty;
-	bool is_accessed;
-	
-	struct file* file;
-	off_t file_ofs;
-	uint32_t file_read_bytes;
-	uint32_t file_zero_bytes;
-    enum falloc_flags flags;
-
-	size_t swap_idx;
-
-	void *upage;
-	void *kpage;
-	
-	struct hash_elem elem;
-};
-
 static unsigned s_page_table_hash_func (const struct hash_elem *, void *);
 static bool s_page_table_hash_less_func (const struct hash_elem *, 
     const struct hash_elem *, void *);
-static struct s_page_table_entry* find_s_page_table_entry_from_upage (void *);
 
 void
 init_s_page_table (void)
@@ -113,7 +87,7 @@ s_page_table_lazy_add (void *upage, bool writable, enum falloc_flags flags)
     return s_page_table_add (true, NULL, 0, writable, upage, NULL, 0, 0, flags);
 }
 
-static struct s_page_table_entry*
+struct s_page_table_entry*
 find_s_page_table_entry_from_upage (void* upage)
 {
 	struct s_page_table_entry entry;

@@ -604,6 +604,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
   ASSERT (ofs % PGSIZE == 0);
 
   file_seek (file, ofs);
+  int i = 0;
   while (read_bytes > 0 || zero_bytes > 0) 
     {
       /* Calculate how to fill this page.
@@ -611,39 +612,20 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
          and zero the final PAGE_ZERO_BYTES bytes. */
       size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
       size_t page_zero_bytes = PGSIZE - page_read_bytes;
-
-      /* Get a page of memory. */
-      /* PALLOC -> FALLOC */
-      uint8_t *kpage = falloc_get_frame_w_upage (FAL_USER, upage);
-      if (kpage == NULL)
+      
+      bool success = s_page_table_file_add(upage, writable, file, ofs + PGSIZE * i, 
+        page_read_bytes, page_zero_bytes, FAL_USER);
+      if (!success)
+      {
+        // TODO: 앞서 성공한 것 delete
         return false;
-
-      /* Load this page. */
-      if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
-        {
-          /* PALLOC -> FALLOC */
-          falloc_free_frame_from_frame (kpage);
-          return false; 
-        }
-      memset (kpage + page_read_bytes, 0, page_zero_bytes);
-
-      /* Add the page to the process's address space. */
-      if (!install_page (upage, kpage, writable)) 
-        {
-          /* PALLOC -> FALLOC */
-          falloc_free_frame_from_frame (kpage);
-          return false; 
-        }
-      // TODO: 추후 `s_page_table_file_add`를 이용한 lazy loading을 변경해야 함.
-      if (!s_page_table_binded_add(upage, kpage, writable))
-        {
-          falloc_free_frame_from_frame (kpage);
-          return false;  
-        }
+      }
+      
       /* Advance. */
       read_bytes -= page_read_bytes;
       zero_bytes -= page_zero_bytes;
       upage += PGSIZE;
+      i++;
     }
   return true;
 }

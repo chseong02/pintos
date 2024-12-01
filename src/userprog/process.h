@@ -46,5 +46,6 @@ void file_lock_release();
 int get_available_fd(struct process *p);
 bool set_fd(struct process *p, int fd, struct file *_file);
 void remove_fd(struct process *p, int fd);
+bool install_page (void *upage, void *kpage, bool writable);
 
 #endif /* userprog/process.h */

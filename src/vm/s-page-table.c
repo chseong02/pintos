@@ -18,7 +18,7 @@ static unsigned
 s_page_table_hash_func (const struct hash_elem *e, void *aux)
 {
 	struct s_page_table_entry *entry = hash_entry (e, struct s_page_table_entry, elem);
-	return hash_bytes (&entry->upage, 32);
+	return hash_bytes (&entry->upage, 4);
 }
 
 static bool
@@ -40,7 +40,11 @@ s_page_table_add (bool is_lazy, struct file *file, off_t file_ofs,
         return false;
 
     if (find_s_page_table_entry_from_upage (upage))
-        return false;
+	{
+		free (entry);
+		return false;
+	}
+        
 
     struct thread *thread = thread_current ();
     entry->present = true;
@@ -94,8 +98,7 @@ find_s_page_table_entry_from_upage (void* upage)
     struct thread *thread = thread_current ();
 
 	entry.upage = upage;
-    
-	struct hash_elem *finded_elem = hash_find(&thread->s_page_table, &entry.elem);
+	struct hash_elem *finded_elem = hash_find(&thread->s_page_table, &(entry.elem));
 	if (!finded_elem)
 		return NULL;
 	return hash_entry (finded_elem, struct s_page_table_entry, elem);

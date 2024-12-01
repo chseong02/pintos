@@ -6,6 +6,7 @@
 #include "threads/thread.h"
 #include "userprog/syscall.h"
 #include "vm/page.h"
+#include "userprog/process.h"
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
@@ -162,7 +163,7 @@ page_fault (struct intr_frame *f)
   if (upage)
    sys_exit (-1);
   if (make_page_binded (upage))
-   sys_Exit (-1);
+   sys_exit (-1);
   return;
   /* To implement virtual memory, delete the rest of the function
      body, and replace it with code that brings in the page to

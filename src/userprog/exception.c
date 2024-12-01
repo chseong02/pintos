@@ -160,9 +160,9 @@ page_fault (struct intr_frame *f)
   }
   /* User caused page fault */
   void* upage = find_page_from_uaddr (fault_addr);
-  if (upage)
+  if (!upage)
    sys_exit (-1);
-  if (make_page_binded (upage))
+  if (!make_page_binded (upage))
    sys_exit (-1);
   return;
   /* To implement virtual memory, delete the rest of the function

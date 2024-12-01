@@ -602,7 +602,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
   ASSERT (ofs % PGSIZE == 0);
 
   file_seek (file, ofs);
-  int i = 0;
+  off_t new_ofs = ofs;
   while (read_bytes > 0 || zero_bytes > 0) 
     {
       /* Calculate how to fill this page.
@@ -611,19 +611,18 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
       size_t page_zero_bytes = PGSIZE - page_read_bytes;
       
-      bool success = s_page_table_file_add(upage, writable, file, ofs + PGSIZE * i, 
+      bool success = s_page_table_file_add(upage, writable, file, new_ofs, 
         page_read_bytes, page_zero_bytes, FAL_USER);
       if (!success)
       {
         // TODO: 앞서 성공한 것 delete
         return false;
       }
-      
       /* Advance. */
       read_bytes -= page_read_bytes;
       zero_bytes -= page_zero_bytes;
       upage += PGSIZE;
-      i++;
+      new_ofs += page_read_bytes;
     }
   return true;
 }

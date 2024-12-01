@@ -53,6 +53,10 @@ bool make_page_binded (void *upage)
             return false; 
         }
         // TODO: change entry data about lazy loading, load status, etc.
+        entry->has_loaded = true;
+        entry->kpage = kpage;
+        
+        
         return true;
     }
     if (entry->in_swap)

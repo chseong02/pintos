@@ -153,9 +153,9 @@ page_fault (struct intr_frame *f)
 
    /* Kernel caused page fault by accessing user memory */
    if(user && !check_ptr_in_user_space (fault_addr))
-      sys_exit(-1);
+      sys_exit (-1);
    /* User caused page fault */
-   void* upage = find_page_from_uaddr (fault_addr);
+   void* upage = find_page_from_uaddr (fault_addr, write);
    if (!upage)
       sys_exit (-1);
    

@@ -155,8 +155,18 @@ page_fault (struct intr_frame *f)
    if(user && !check_ptr_in_user_space (fault_addr))
       sys_exit (-1);
    /* User caused page fault */
-   void* upage = find_page_from_uaddr (fault_addr, write);
+   void* upage = find_page_from_uaddr (fault_addr);
    if (!upage)
+   {
+      if ((uint32_t) fault_addr >= (uint32_t) 0xc0000000 - (uint32_t) 0x00800000 && 
+         (uint32_t) fault_addr >= (uint32_t) f->esp - 32)
+      {
+         if (make_more_binded_stack_space (fault_addr))
+            return;
+      }
+      sys_exit (-1);
+   }
+   if (!is_writable_page (upage) && write)
       sys_exit (-1);
    
    bool success = make_page_binded (upage);

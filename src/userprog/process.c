@@ -25,6 +25,7 @@
 
 static struct lock pid_lock;
 static struct lock file_lock;
+static int file_lock_shares;
 
 /*---------------------------------------------------------------------------*/
 
@@ -49,6 +50,7 @@ process_init(void)
   t = thread_current();
 
   lock_init(&pid_lock);
+  file_lock_shares = 0;
   lock_init(&file_lock);
   
   p = palloc_get_page (PAL_ZERO);
@@ -710,6 +712,11 @@ init_process (struct process *p)
 void
 file_lock_acquire (void)
 {
+  if (file_lock.holder == thread_current())
+  {
+    file_lock_shares += 1;
+    return;
+  }
   lock_acquire (&file_lock);
 }
 
@@ -717,6 +724,11 @@ file_lock_acquire (void)
 void
 file_lock_release (void)
 {
+  if (file_lock_shares > 0)
+  {
+    file_lock_shares -= 1;
+    return;
+  }
   lock_release (&file_lock);
 }
 

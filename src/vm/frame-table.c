@@ -1,10 +1,12 @@
 #include "vm/frame-table.h"
 #include "threads/thread.h"
 #include "threads/palloc.h"
+#include "threads/synch.h"
 #include "threads/malloc.h"
 #include <list.h>
 
 static struct list frame_table;
+static struct lock frame_table_lock;
 
 struct frame_table_entry
 {
@@ -18,7 +20,8 @@ struct frame_table_entry
 void
 frame_table_init (void)
 {
-    list_init(&frame_table);
+    list_init (&frame_table);
+    lock_init (&frame_table_lock);
 }
 
 void*
@@ -58,13 +61,18 @@ falloc_get_frame_w_upage (enum falloc_flags flags, void *upage)
     entry->upage = upage;
     entry->kpage = kpage;
     entry->use_flag = false;
+
+    lock_acquire (&frame_table_lock);
     list_push_back (&frame_table, &entry->elem);
+    lock_release (&frame_table_lock);
     return kpage;
 }
 
 static struct frame_table_entry*
 find_frame_table_entry_from_upage (void *upage)
 {
+    lock_acquire (&frame_table_lock);
+
     struct list_elem *e;
     for (e = list_begin (&frame_table); e != list_end (&frame_table); 
         e = list_next (e))
@@ -72,14 +80,20 @@ find_frame_table_entry_from_upage (void *upage)
         struct frame_table_entry *entry = 
             list_entry (e, struct frame_table_entry, elem);
         if (entry->upage == upage)
+        {
+            lock_release (&frame_table_lock);
             return entry;
+        }
     }
+    lock_release (&frame_table_lock);
     return NULL;
 }
 
 static struct frame_table_entry*
 find_frame_table_entry_from_frame (void *frame)
 {
+    lock_acquire (&frame_table_lock);
+
     struct list_elem *e;
     for (e = list_begin (&frame_table); e != list_end (&frame_table); 
         e = list_next (e))
@@ -87,8 +101,12 @@ find_frame_table_entry_from_frame (void *frame)
         struct frame_table_entry *entry = 
             list_entry (e, struct frame_table_entry, elem);
         if (entry->kpage == frame)
+        {
+            lock_release (&frame_table_lock);
             return entry;
+        }
     }
+    lock_release (&frame_table_lock);
     return NULL;
 }
 
@@ -99,7 +117,9 @@ falloc_free_frame_from_upage (void *upage)
     if (!entry)
         return;
     
+    lock_acquire (&frame_table_lock);
     list_remove (&entry->elem);
+    lock_release (&frame_table_lock);
     palloc_free_page (entry->kpage);
     free (entry);
 }
@@ -110,8 +130,9 @@ falloc_free_frame_from_frame (void *frame)
     struct frame_table_entry *entry = find_frame_table_entry_from_frame (frame);
     if (!entry)
         return;
-    
+    lock_acquire (&frame_table_lock);
     list_remove (&entry->elem);
+    lock_release (&frame_table_lock);
     palloc_free_page (entry->kpage);
     free (entry);  
 }

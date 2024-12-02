@@ -34,11 +34,7 @@ bool make_more_binded_stack_space (void *uaddr)
     {
         success = install_page (upage, kpage, true) && 
         s_page_table_binded_add (upage, kpage, true);
-        if (success)
-        {   
-            //printf("신장!\n");
-        }
-        else
+        if (!success)
         {
             /* PALLOC -> FALLOC */
             falloc_free_frame_from_frame (kpage);

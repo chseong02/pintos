@@ -105,6 +105,7 @@ syscall_handler (struct intr_frame *f)
   int arg[4];
   if (!check_ptr_in_user_space (f->esp))
     sys_exit (-1);
+  thread_current()->last_esp = f->esp;
   switch(*(uint32_t *) (f->esp))
   {
     case SYS_HALT:

@@ -158,8 +158,12 @@ page_fault (struct intr_frame *f)
    void* upage = find_page_from_uaddr (fault_addr);
    if (!upage)
    {
+      void* esp = f->esp;
+      if (!user)
+         esp = thread_current()->last_esp;
+         
       if ((uint32_t) fault_addr >= (uint32_t) 0xc0000000 - (uint32_t) 0x00800000 && 
-         (uint32_t) fault_addr >= (uint32_t) f->esp - 32)
+         (uint32_t) fault_addr >= (uint32_t) esp - 32)
       {
          if (make_more_binded_stack_space (fault_addr))
             return;

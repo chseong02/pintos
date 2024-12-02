@@ -115,6 +115,7 @@ struct thread
     uint32_t *pagedir;                  /* Page directory. */
     struct hash s_page_table;           /* Supplemental Page Table */
     struct process* process_ptr;
+    void* last_esp;
 #endif
 
     /* Owned by thread.c. */

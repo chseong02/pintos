@@ -36,13 +36,14 @@ bool make_page_binded (void *upage)
         off_t page_read_bytes = entry->file_read_bytes;
         off_t page_zero_bytes = entry->file_zero_bytes;
         off_t writable = entry->writable;
-
+        file_lock_acquire();
         // We don't have to `file_open`, because It's not closed.
         file_seek (file, ofs);
         /* Load this page. */
         if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
         {
             falloc_free_frame_from_frame (kpage);
+            file_lock_release();
             return false; 
         }
         memset (kpage + page_read_bytes, 0, page_zero_bytes);
@@ -50,18 +51,20 @@ bool make_page_binded (void *upage)
         if (!install_page (upage, kpage, writable)) 
         {
             falloc_free_frame_from_frame (kpage);
+            file_lock_release();
             return false; 
         }
         // TODO: change entry data about lazy loading, load status, etc.
         entry->has_loaded = true;
         entry->kpage = kpage;
         
-        
+        file_lock_release();
         return true;
     }
     if (entry->in_swap)
     {
         //TODO: Impl Swap in
     }
+    file_lock_release();
     return false;
 }

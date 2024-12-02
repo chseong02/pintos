@@ -3,7 +3,7 @@
 #include "vm/frame-table.h"
 #include "userprog/process.h"
 
-void* find_page_from_uaddr (void *uaddr, bool write)
+void* find_page_from_uaddr (void *uaddr)
 {
     void *upage = (uint32_t) uaddr & 0xFFFFF000;
     struct s_page_table_entry *entry = find_s_page_table_entry_from_upage (upage);
@@ -11,9 +11,40 @@ void* find_page_from_uaddr (void *uaddr, bool write)
         return NULL;
     if (!entry->present)
         return NULL;
-    if (!entry->writable && write)
-        return NULL;
     return entry->upage;
+}
+
+bool is_writable_page (void *upage)
+{
+    struct s_page_table_entry *entry = find_s_page_table_entry_from_upage (upage);
+    if (!entry)
+        return false;
+    return entry->writable;
+}
+
+bool make_more_binded_stack_space (void *uaddr)
+{
+    void *upage = (uint32_t) uaddr & 0xFFFFF000;
+    uint8_t *kpage;
+    bool success = false;
+
+    /* PALLOC -> FALLOC */
+    kpage = falloc_get_frame_w_upage (FAL_USER | FAL_ZERO, upage);
+    if (kpage != NULL) 
+    {
+        success = install_page (upage, kpage, true) && 
+        s_page_table_binded_add (upage, kpage, true);
+        if (success)
+        {   
+            //printf("신장!\n");
+        }
+        else
+        {
+            /* PALLOC -> FALLOC */
+            falloc_free_frame_from_frame (kpage);
+        }
+    }
+    return success;
 }
 
 bool make_page_binded (void *upage)

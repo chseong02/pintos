@@ -11,7 +11,7 @@ void* find_page_from_uaddr (void *uaddr, bool write)
         return NULL;
     if (!entry->present)
         return NULL;
-    if (!entry->writable && writable)
+    if (!entry->writable && write)
         return NULL;
     return entry->upage;
 }

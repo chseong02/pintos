@@ -160,10 +160,9 @@ page_fault (struct intr_frame *f)
    {
       void* esp = f->esp;
       if (!user)
-         esp = thread_current()->last_esp;
+         esp = thread_current ()->last_esp;
          
-      if ((uint32_t) fault_addr >= (uint32_t) 0xc0000000 - (uint32_t) 0x00800000 && 
-         (uint32_t) fault_addr >= (uint32_t) esp - 32)
+      if (is_valid_stack_address_heuristic (fault_addr, esp))
       {
          if (make_more_binded_stack_space (fault_addr))
             return;
@@ -176,12 +175,6 @@ page_fault (struct intr_frame *f)
    bool success = make_page_binded (upage);
    if (!success)
       sys_exit (-1);
-   
-   // else if (!success)
-   // {
-   //    f->eip = (void *)f->eax;
-   //    f->eax = -1;
-   // }
 
    return;
    /* To implement virtual memory, delete the rest of the function

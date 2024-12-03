@@ -2,10 +2,11 @@
 #include "vm/s-page-table.h"
 #include "vm/frame-table.h"
 #include "userprog/process.h"
+#include "threads/vaddr.h"
 
 void* find_page_from_uaddr (void *uaddr)
 {
-    void *upage = (uint32_t) uaddr & 0xFFFFF000;
+    void *upage = pg_round_down (uaddr);
     struct s_page_table_entry *entry = find_s_page_table_entry_from_upage (upage);
     if (!entry)
         return NULL;
@@ -22,9 +23,15 @@ bool is_writable_page (void *upage)
     return entry->writable;
 }
 
+bool is_valid_stack_address_heuristic (void *fault_addr, void *esp)
+{
+    return ((uint32_t) fault_addr >= (uint32_t) PHYS_BASE - (uint32_t) 0x00800000
+        && (uint32_t) fault_addr >= (uint32_t) esp - 32);
+}
+
 bool make_more_binded_stack_space (void *uaddr)
 {
-    void *upage = (uint32_t) uaddr & 0xFFFFF000;
+    void *upage = pg_round_down (uaddr);
     uint8_t *kpage;
     bool success = false;
 

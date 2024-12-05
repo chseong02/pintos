@@ -37,6 +37,7 @@
 #include "devices/ide.h"
 #include "filesys/filesys.h"
 #include "filesys/fsutil.h"
+#include "swap-table.h"
 #endif
 
 /* Page directory with kernel mappings only. */
@@ -127,6 +128,7 @@ main (void)
   ide_init ();
   locate_block_devices ();
   filesys_init (format_filesys);
+  swap_table_init ();
 #endif
 
   printf ("Boot complete.\n");

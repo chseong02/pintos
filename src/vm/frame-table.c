@@ -136,3 +136,9 @@ falloc_free_frame_from_frame (void *frame)
     palloc_free_page (entry->kpage);
     free (entry);  
 }
+
+void*
+pick_upage_to_swap (void)
+{
+
+}

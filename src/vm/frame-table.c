@@ -44,6 +44,7 @@ falloc_get_frame_w_upage (enum falloc_flags flags, void *upage)
     if (!kpage)
     {
         //TODO: evict policy
+        printf("스왑한다!!!!\n");
         page_swap_out ();
         if (flags & FAL_ASSERT)
             _palloc_flags |= PAL_ASSERT;
@@ -62,6 +63,7 @@ falloc_get_frame_w_upage (enum falloc_flags flags, void *upage)
     }
 
     entry->tid = thread_current()->tid;
+    entry->thread = thread_current ();
     entry->upage = upage;
     entry->kpage = kpage;
     entry->use_flag = false;
@@ -161,15 +163,18 @@ pick_thread_upage_to_swap (struct thread **t, void** upage)
 
     if (clock_hand == NULL)
     {
-        clock_hand = list_begin (&frame_table);
-        if (clock_hand == list_end (&frame_table))
+        clock_hand = list_entry (list_begin (&frame_table), struct frame_table_entry, elem);
+        if (&clock_hand->elem == list_end (&frame_table))
+        {
             lock_release (&frame_table_lock);
             return false;
+        }
     }
+    printf("하하하하\n");
     //TODO: lock 관리 더 세밀하게.
     //TODO: 두바퀴를 돌아 circle queue처럼 보이게.
     //TODO: 시작 시점은 기록하고 그 시점부터 탐색 시작해야함.
-    for (e = clock_hand; e != list_end (&frame_table);
+    for (e = &clock_hand->elem; e != list_end (&frame_table);
          e = list_next (e))
     {
         struct frame_table_entry *entry = 
@@ -181,11 +186,14 @@ pick_thread_upage_to_swap (struct thread **t, void** upage)
         {
             *t = entry->thread;
             *upage = entry->upage;
+            clock_hand = entry;
             lock_release (&frame_table_lock);
+            printf("리턴은 햇냐?");
             return true;
         }
         pagedir_set_accessed (pd, entry->upage, false);
     }
+    printf("첫번째\n");
     for (e = list_begin (&frame_table); e != list_end (&frame_table);
          e = list_next (e))
     {
@@ -198,13 +206,14 @@ pick_thread_upage_to_swap (struct thread **t, void** upage)
         {
             *t = entry->thread;
             *upage = entry->upage;
+            clock_hand = entry;
             lock_release (&frame_table_lock);
             return true;
         }
         pagedir_set_accessed (pd, entry->upage, false);
     }
-    //TODO: 초침 직전까지 탐색하게.
-    for (e = list_begin (&frame_table); e != clock_hand;
+    printf("두번째\n");
+    for (e = list_begin (&frame_table); e != &clock_hand->elem;
          e = list_next (e))
     {
         struct frame_table_entry *entry = 
@@ -216,11 +225,13 @@ pick_thread_upage_to_swap (struct thread **t, void** upage)
         {
             *t = entry->thread;
             *upage = entry->upage;
+            clock_hand = entry;
             lock_release (&frame_table_lock);
             return true;
         }
         pagedir_set_accessed (pd, entry->upage, false);
     }
+    printf("세번째\n");
     lock_release (&frame_table_lock);
     return false;
 }

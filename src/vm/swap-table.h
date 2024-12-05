@@ -1,6 +1,8 @@
 #include <stdbool.h>
+#include <stddef.h>
 
 #define SWAP_ERROR BITMAP_ERROR
+
 
 void swap_table_init (void);
 

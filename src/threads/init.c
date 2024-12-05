@@ -37,7 +37,7 @@
 #include "devices/ide.h"
 #include "filesys/filesys.h"
 #include "filesys/fsutil.h"
-#include "swap-table.h"
+#include "vm/swap-table.h"
 #endif
 
 /* Page directory with kernel mappings only. */

@@ -58,6 +58,10 @@ bool make_page_binded (void *upage)
     struct s_page_table_entry *entry = find_s_page_table_entry_from_upage (upage);
     if (!entry || !entry->present)
         return false;
+    if (entry->in_swap)
+    {
+        printf("스왑보면 어캄\n");
+    }
     if (entry->is_lazy && !entry->has_loaded)
     {
         // NOT FOR FILE, just Lazy loading
@@ -102,6 +106,7 @@ bool make_page_binded (void *upage)
     }
     if (entry->in_swap)
     {
+
         //TODO: Impl Swap in
     }
     file_lock_release();
@@ -115,9 +120,12 @@ page_swap_out (void)
     uint32_t *pd;
 	struct thread *t;
 	void* upage;
+    printf("하이0\n");
 	if (!pick_thread_upage_to_swap (&t, &upage))
 		return false;
+    printf("하이1\n");
 	entry = find_s_page_table_entry_from_thread_upage (&t, &upage);
+    printf("하이2\n");
     if (!entry)
         return false;
     pd = t->pagedir;
@@ -129,13 +137,15 @@ page_swap_out (void)
         entry->swap_idx = swap_idx;
         entry->in_swap = true;
     }
-    entry->present = false;
+    printf("하이3\n");
     if (entry->is_lazy)
         entry->has_loaded = false;
     void *kpage = entry->kpage;
     entry->kpage = NULL;
+    printf("하이4\n");
     falloc_free_frame_from_frame (kpage);
+    printf("하이5\n");
     pagedir_clear_page (pd, entry->upage);
-
+    printf("하이6\n");
 	return false;
 }

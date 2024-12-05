@@ -1,6 +1,9 @@
 #ifndef VM_FRAME_TABLE_H
 #define VM_FRAME_TABLE_H
 
+#include <stdbool.h>
+#include "threads/thread.h"
+
 /* Flags for falloc_get_frame_w_upage */
 enum falloc_flags
 {

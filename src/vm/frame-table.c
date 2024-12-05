@@ -4,6 +4,7 @@
 #include "threads/synch.h"
 #include "threads/malloc.h"
 #include <list.h>
+#include "userprog/pagedir.h"
 
 static struct list frame_table;
 static struct lock frame_table_lock;
@@ -11,6 +12,7 @@ static struct lock frame_table_lock;
 struct frame_table_entry
 {
     tid_t tid;
+    struct thread* thread;
     void *upage;
     void *kpage;
     bool use_flag;
@@ -137,8 +139,63 @@ falloc_free_frame_from_frame (void *frame)
     free (entry);  
 }
 
-void*
-pick_upage_to_swap (void)
+bool
+pick_thread_upage_to_swap (struct thread *t, void* upage)
 {
-
+    lock_acquire (&frame_table_lock);
+    struct list_elem *e;
+    //TODO: lock 관리 더 세밀하게.
+    //TODO: 두바퀴를 돌아 circle queue처럼 보이게.
+    //TODO: 시작 시점은 기록하고 그 시점부터 탐색 시작해야함.
+    for (e = list_begin (&frame_table); e != list_end (&frame_table);
+         e = list_next (e))
+    {
+        struct frame_table_entry *entry = 
+            list_entry (e, struct frame_table_entry, elem);
+        
+        uint32_t *pd = entry->thread->pagedir;
+        bool is_accessed = pagedir_is_accessed (pd, entry->upage);
+        if (!is_accessed)
+        {
+            t = entry->thread;
+            upage = entry->upage;
+            return true;
+        }
+        pagedir_set_accessed (pd, entry->upage, false);
+    }
+    for (e = list_begin (&frame_table); e != list_end (&frame_table);
+         e = list_next (e))
+    {
+        struct frame_table_entry *entry = 
+            list_entry (e, struct frame_table_entry, elem);
+        
+        uint32_t *pd = entry->thread->pagedir;
+        bool is_accessed = pagedir_is_accessed (pd, entry->upage);
+        if (!is_accessed)
+        {
+            t = entry->thread;
+            upage = entry->upage;
+            return true;
+        }
+        pagedir_set_accessed (pd, entry->upage, false);
+    }
+    //TODO: 초침 직전까지 탐색하게.
+    for (e = list_begin (&frame_table); e != list_end (&frame_table);
+         e = list_next (e))
+    {
+        struct frame_table_entry *entry = 
+            list_entry (e, struct frame_table_entry, elem);
+        
+        uint32_t *pd = entry->thread->pagedir;
+        bool is_accessed = pagedir_is_accessed (pd, entry->upage);
+        if (!is_accessed)
+        {
+            t = entry->thread;
+            upage = entry->upage;
+            return true;
+        }
+        pagedir_set_accessed (pd, entry->upage, false);
+    }
+    lock_release (&frame_table_lock);
+    return false;
 }

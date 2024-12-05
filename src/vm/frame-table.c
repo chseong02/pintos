@@ -44,7 +44,7 @@ falloc_get_frame_w_upage (enum falloc_flags flags, void *upage)
     if (!kpage)
     {
         //TODO: evict policy
-        // evict_policy();
+        page_swap_out ();
         if (flags & FAL_ASSERT)
             _palloc_flags |= PAL_ASSERT;
         kpage = palloc_get_page (_palloc_flags);
@@ -163,6 +163,7 @@ pick_thread_upage_to_swap (struct thread **t, void** upage)
     {
         clock_hand = list_begin (&frame_table);
         if (clock_hand == list_end (&frame_table))
+            lock_release (&frame_table_lock);
             return false;
     }
     //TODO: lock 관리 더 세밀하게.
@@ -180,6 +181,7 @@ pick_thread_upage_to_swap (struct thread **t, void** upage)
         {
             *t = entry->thread;
             *upage = entry->upage;
+            lock_release (&frame_table_lock);
             return true;
         }
         pagedir_set_accessed (pd, entry->upage, false);
@@ -196,6 +198,7 @@ pick_thread_upage_to_swap (struct thread **t, void** upage)
         {
             *t = entry->thread;
             *upage = entry->upage;
+            lock_release (&frame_table_lock);
             return true;
         }
         pagedir_set_accessed (pd, entry->upage, false);
@@ -213,6 +216,7 @@ pick_thread_upage_to_swap (struct thread **t, void** upage)
         {
             *t = entry->thread;
             *upage = entry->upage;
+            lock_release (&frame_table_lock);
             return true;
         }
         pagedir_set_accessed (pd, entry->upage, false);

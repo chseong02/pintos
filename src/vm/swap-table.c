@@ -19,7 +19,7 @@ struct swap_table
 static struct swap_table swap_table;
 
 void
-init_swap_table (void)
+swap_table_init (void)
 {
     swap_table.swap_block = block_get_role (BLOCK_SWAP);
     if (!swap_table.swap_block)

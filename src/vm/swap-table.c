@@ -49,7 +49,7 @@ swap_out (void* frame)
     {
         block_sector_t sector_idx = page_start_sector_idx + i;
         void* start_save_ptr = (uint32_t) frame + (uint32_t) (i * BLOCK_SECTOR_SIZE);
-        block_write (swap_table.swap_block, sector_idx, frame + i);
+        block_write (swap_table.swap_block, sector_idx, start_save_ptr);
     }
     return swap_disk_page_idx;
 }

@@ -7,7 +7,6 @@
 #include "threads/malloc.h"
 
 #define PG_IN_SECTOR (PGSIZE / BLOCK_SECTOR_SIZE)
-#define SWAP_ERROR BITMAP_ERROR
 
 struct swap_table
 {

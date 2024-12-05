@@ -3,6 +3,9 @@
 #include "vm/frame-table.h"
 #include "userprog/process.h"
 #include "threads/vaddr.h"
+#include "userprog/pagedir.h"
+#include "vm/swap-table.h"
+#include <bitmap.h>
 
 void* find_page_from_uaddr (void *uaddr)
 {
@@ -103,4 +106,36 @@ bool make_page_binded (void *upage)
     }
     file_lock_release();
     return false;
+}
+
+bool
+page_swap_out (void)
+{
+    struct s_page_table_entry *entry;
+    uint32_t *pd;
+	struct thread *t;
+	void* upage;
+	if (!pick_thread_upage_to_swap (&t, &upage))
+		return false;
+	entry = find_s_page_table_entry_from_thread_upage (&t, &upage);
+    if (!entry)
+        return false;
+    pd = t->pagedir;
+    if (pagedir_is_dirty (pd, upage))
+    {
+        size_t swap_idx = swap_out (entry->kpage);
+        if (swap_idx == SWAP_ERROR)
+            return false;
+        entry->swap_idx = swap_idx;
+        entry->in_swap = true;
+    }
+    entry->present = false;
+    if (entry->is_lazy)
+        entry->has_loaded = false;
+    void *kpage = entry->kpage;
+    entry->kpage = NULL;
+    falloc_free_frame_from_frame (kpage);
+    pagedir_clear_page (pd, entry->upage);
+
+	return false;
 }

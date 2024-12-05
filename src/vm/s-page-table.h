@@ -2,6 +2,7 @@
 #include <hash.h>
 #include "filesys/file.h"
 #include "vm/frame-table.h"
+#include "threads/thread.h"
 
 struct s_page_table_entry 
 {
@@ -41,3 +42,5 @@ bool s_page_table_lazy_add (void *upage, bool writable, enum falloc_flags flags)
 void s_page_table_delete_from_upage (void *upage);
 
 struct s_page_table_entry* find_s_page_table_entry_from_upage (void *);
+struct s_page_table_entry* find_s_page_table_entry_from_thread_upage 
+	(struct thread *t, void* upage);

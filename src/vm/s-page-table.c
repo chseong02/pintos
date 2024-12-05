@@ -118,3 +118,15 @@ s_page_table_delete_from_upage (void *upage)
 	hash_delete (&thread->s_page_table, &entry->elem);
 	free (entry);
 }
+
+struct s_page_table_entry*
+find_s_page_table_entry_from_thread_upage (struct thread *t, void* upage)
+{
+	struct s_page_table_entry entry;
+
+	entry.upage = upage;
+	struct hash_elem *finded_elem = hash_find(&t->s_page_table, &(entry.elem));
+	if (!finded_elem)
+		return NULL;
+	return hash_entry (finded_elem, struct s_page_table_entry, elem);
+}

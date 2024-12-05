@@ -53,3 +53,27 @@ swap_out (void* frame)
     }
     return swap_disk_page_idx;
 }
+
+bool
+swap_in (size_t swap_idx, void* frame)
+{
+    block_sector_t page_start_sector_idx;
+    lock_acquire (&swap_table.lock);
+    if (!bitmap_test (swap_table.used_map, swap_idx))
+        return false;
+    lock_release (&swap_table.lock);
+
+    page_start_sector_idx = swap_idx * PG_IN_SECTOR;
+    for (uint32_t i = 0; i< PG_IN_SECTOR; i++)
+    {
+        block_sector_t sector_idx = page_start_sector_idx + i;
+        void* start_load_ptr = (uint32_t) frame + (uint32_t) (i * BLOCK_SECTOR_SIZE);
+        block_read (swap_table.swap_block, sector_idx, start_load_ptr);
+    }
+
+    lock_acquire (&swap_table.lock);
+    bitmap_set_multiple (swap_table.used_map, page_start_sector_idx, 
+        PG_IN_SECTOR, false);
+    lock_release (&swap_table.lock);
+    return true;
+}

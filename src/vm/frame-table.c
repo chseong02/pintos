@@ -154,7 +154,7 @@ falloc_free_frame_from_frame (void *frame)
 }
 
 bool
-pick_thread_upage_to_swap (struct thread *t, void* upage)
+pick_thread_upage_to_swap (struct thread **t, void** upage)
 {
     lock_acquire (&frame_table_lock);
     struct list_elem *e;
@@ -178,8 +178,8 @@ pick_thread_upage_to_swap (struct thread *t, void* upage)
         bool is_accessed = pagedir_is_accessed (pd, entry->upage);
         if (!is_accessed)
         {
-            t = entry->thread;
-            upage = entry->upage;
+            *t = entry->thread;
+            *upage = entry->upage;
             return true;
         }
         pagedir_set_accessed (pd, entry->upage, false);
@@ -194,8 +194,8 @@ pick_thread_upage_to_swap (struct thread *t, void* upage)
         bool is_accessed = pagedir_is_accessed (pd, entry->upage);
         if (!is_accessed)
         {
-            t = entry->thread;
-            upage = entry->upage;
+            *t = entry->thread;
+            *upage = entry->upage;
             return true;
         }
         pagedir_set_accessed (pd, entry->upage, false);
@@ -211,8 +211,8 @@ pick_thread_upage_to_swap (struct thread *t, void* upage)
         bool is_accessed = pagedir_is_accessed (pd, entry->upage);
         if (!is_accessed)
         {
-            t = entry->thread;
-            upage = entry->upage;
+            *t = entry->thread;
+            *upage = entry->upage;
             return true;
         }
         pagedir_set_accessed (pd, entry->upage, false);

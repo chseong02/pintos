@@ -124,7 +124,7 @@ page_swap_out (void)
 	if (!pick_thread_upage_to_swap (&t, &upage))
 		return false;
     printf("하이1\n");
-	entry = find_s_page_table_entry_from_thread_upage (&t, &upage);
+	entry = find_s_page_table_entry_from_thread_upage (t, upage);
     printf("하이2\n");
     if (!entry)
         return false;

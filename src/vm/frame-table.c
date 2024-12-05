@@ -126,9 +126,12 @@ falloc_free_frame_from_upage (void *upage)
     lock_acquire (&frame_table_lock);
     if (clock_hand == entry)
     {
-        clock_hand = list_next (entry);
-        if (clock_hand == list_end (&frame_table))
+        printf("일어낫냐?");
+        struct list_elem *next = list_next (&entry->elem);
+        if (next == list_end (&frame_table))
             clock_hand = NULL;
+        else
+            clock_hand = list_entry(next, struct frame_table_entry, elem);
     }
     list_remove (&entry->elem);
     lock_release (&frame_table_lock);
@@ -145,9 +148,12 @@ falloc_free_frame_from_frame (void *frame)
     lock_acquire (&frame_table_lock);
     if (clock_hand == entry)
     {
-        clock_hand = list_next (entry);
-        if (clock_hand == list_end (&frame_table))
+        printf("일어낫냐?");
+        struct list_elem *next = list_next (&entry->elem);
+        if (next == list_end (&frame_table))
             clock_hand = NULL;
+        else
+            clock_hand = list_entry(next, struct frame_table_entry, elem);
     }
     list_remove (&entry->elem);
     lock_release (&frame_table_lock);

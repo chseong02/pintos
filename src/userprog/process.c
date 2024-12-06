@@ -700,6 +700,7 @@ init_process (struct process *p)
   sema_init (&p->exit_code_sema, 0);
   sema_init (&p->exec_load_sema, 0);
   list_init (&p->children);
+  list_init (&p->fmm_data_list);
 
   /* Initialize fd table */
   p->fd_table[0].in_use = true;

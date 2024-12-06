@@ -3,6 +3,7 @@
 
 #include "threads/thread.h"
 #include "threads/synch.h"
+#include "lib/user/syscall.h"
 
 #define OPEN_MAX 128
 
@@ -37,16 +38,17 @@ struct process
   struct file *file_exec;
   struct fd_table_entry fd_table[OPEN_MAX];
   struct list fmm_data_list;
+  int mmap_count;
 };
 
 struct fmm_data
 {
   mapid_t id;
   struct file *file;
-
-  struct list page_list;
+  int file_size;
+  int page_count;
   struct list_elem fmm_data_list_elem;
-}
+};
 
 void init_process (struct process*);
 

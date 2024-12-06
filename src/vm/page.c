@@ -109,19 +109,12 @@ bool make_page_binded (void *upage)
             file_lock_release();
             return false; 
         }
-        // TODO: change entry data about lazy loading, load status, etc.
         entry->has_loaded = true;
         entry->kpage = kpage;
         
         file_lock_release();
         return true;
     }
-    if (entry->in_swap)
-    {
-        //앞으로 옮길 예정.
-        //TODO: Impl Swap in
-    }
-    printf("이게 어떻게 있지?\n");
     return false;
 }
 

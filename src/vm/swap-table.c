@@ -59,7 +59,6 @@ swap_in (size_t swap_idx, void* frame)
     lock_acquire (&swap_table.lock);
     if (!bitmap_test (swap_table.used_map, swap_idx))
     {
-        printf("이런일이 일어난다고?\n");
         lock_release (&swap_table.lock);
         return false;
     }

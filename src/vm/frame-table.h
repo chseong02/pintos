@@ -16,6 +16,7 @@ void frame_table_init (void);
 void* falloc_get_frame_w_upage (enum falloc_flags flags, void *upage);
 void falloc_free_frame_from_upage (void *upage);
 void falloc_free_frame_from_frame (void *frame);
+void falloc_free_frame_from_frame_wo_lock (void *frame);
 bool pick_thread_upage_to_swap (struct thread **t, void** upage);
 
 #endif /* vm/frame-table.h */

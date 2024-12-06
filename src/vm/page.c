@@ -153,7 +153,7 @@ page_swap_out (void)
         
     void *kpage = entry->kpage;
     entry->kpage = NULL;
-    falloc_free_frame_from_frame (kpage);
+    falloc_free_frame_from_frame_wo_lock (kpage);
     pagedir_clear_page (pd, entry->upage);
 	return true;
 }

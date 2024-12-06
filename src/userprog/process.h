@@ -47,6 +47,7 @@ struct fmm_data
   struct file *file;
   int file_size;
   int page_count;
+  void *upage;
   struct list_elem fmm_data_list_elem;
 };
 

@@ -644,7 +644,7 @@ setup_stack (void **esp)
   if (kpage != NULL) 
     {
       success = install_page (upage, kpage, true) && 
-        s_page_table_binded_add(upage, kpage, true);
+        s_page_table_binded_add(upage, kpage, true, FAL_USER | FAL_ZERO);
       if (success)
         *esp = PHYS_BASE;
       else

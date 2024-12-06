@@ -71,9 +71,9 @@ s_page_table_add (bool is_lazy, struct file *file, off_t file_ofs,
 }
 
 bool
-s_page_table_binded_add (void *upage, void *kpage, bool writable)
+s_page_table_binded_add (void *upage, void *kpage, bool writable, enum falloc_flags flags)
 {
-    return s_page_table_add (false, NULL, 0, writable, upage, kpage, 0, 0, 0);
+    return s_page_table_add (false, NULL, 0, writable, upage, kpage, 0, 0, flags);
 }
 
 bool

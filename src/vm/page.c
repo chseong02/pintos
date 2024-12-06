@@ -43,7 +43,7 @@ bool make_more_binded_stack_space (void *uaddr)
     if (kpage != NULL) 
     {
         success = install_page (upage, kpage, true) && 
-        s_page_table_binded_add (upage, kpage, true);
+        s_page_table_binded_add (upage, kpage, true, FAL_USER | FAL_ZERO);
         if (!success)
         {
             /* PALLOC -> FALLOC */
@@ -60,9 +60,21 @@ bool make_page_binded (void *upage)
         return false;
     if (entry->in_swap)
     {
-        printf("스왑보면 어캄\n");
+        void* frame = falloc_get_frame_w_upage (entry->flags, entry->upage);
+        if (!frame)
+            return false;
+        swap_in (entry->swap_idx, frame);
+        entry->kpage = frame;
+        entry->in_swap = false;
+        if (!install_page (upage, frame, entry->writable)) 
+        {
+            falloc_free_frame_from_frame (frame);
+            return false; 
+        }
+        pagedir_set_dirty (thread_current()->pagedir,upage,true);
+        return true;
     }
-    if (entry->is_lazy && !entry->has_loaded)
+    if (!entry->has_loaded)
     {
         // NOT FOR FILE, just Lazy loading
         if (!entry->file)
@@ -106,10 +118,10 @@ bool make_page_binded (void *upage)
     }
     if (entry->in_swap)
     {
-
+        //앞으로 옮길 예정.
         //TODO: Impl Swap in
     }
-    file_lock_release();
+    printf("이게 어떻게 있지?\n");
     return false;
 }
 
@@ -120,12 +132,9 @@ page_swap_out (void)
     uint32_t *pd;
 	struct thread *t;
 	void* upage;
-    printf("하이0\n");
 	if (!pick_thread_upage_to_swap (&t, &upage))
 		return false;
-    printf("하이1\n");
 	entry = find_s_page_table_entry_from_thread_upage (t, upage);
-    printf("하이2\n");
     if (!entry)
         return false;
     pd = t->pagedir;
@@ -137,15 +146,14 @@ page_swap_out (void)
         entry->swap_idx = swap_idx;
         entry->in_swap = true;
     }
-    printf("하이3\n");
-    if (entry->is_lazy)
+    else
+    {
         entry->has_loaded = false;
+    }
+        
     void *kpage = entry->kpage;
     entry->kpage = NULL;
-    printf("하이4\n");
     falloc_free_frame_from_frame (kpage);
-    printf("하이5\n");
     pagedir_clear_page (pd, entry->upage);
-    printf("하이6\n");
-	return false;
+	return true;
 }

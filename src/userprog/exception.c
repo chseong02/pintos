@@ -175,7 +175,6 @@ page_fault (struct intr_frame *f)
    bool success = make_page_binded (upage);
    if (!success)
       sys_exit (-1);
-
    return;
    /* To implement virtual memory, delete the rest of the function
       body, and replace it with code that brings in the page to

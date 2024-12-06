@@ -43,8 +43,6 @@ falloc_get_frame_w_upage (enum falloc_flags flags, void *upage)
     kpage = palloc_get_page (_palloc_flags);
     if (!kpage)
     {
-        //TODO: evict policy
-        printf("스왑한다!!!!\n");
         page_swap_out ();
         if (flags & FAL_ASSERT)
             _palloc_flags |= PAL_ASSERT;
@@ -126,7 +124,6 @@ falloc_free_frame_from_upage (void *upage)
     lock_acquire (&frame_table_lock);
     if (clock_hand == entry)
     {
-        printf("일어낫냐?");
         struct list_elem *next = list_next (&entry->elem);
         if (next == list_end (&frame_table))
             clock_hand = NULL;
@@ -148,7 +145,6 @@ falloc_free_frame_from_frame (void *frame)
     lock_acquire (&frame_table_lock);
     if (clock_hand == entry)
     {
-        printf("일어낫냐?");
         struct list_elem *next = list_next (&entry->elem);
         if (next == list_end (&frame_table))
             clock_hand = NULL;
@@ -176,7 +172,6 @@ pick_thread_upage_to_swap (struct thread **t, void** upage)
             return false;
         }
     }
-    printf("하하하하\n");
     //TODO: lock 관리 더 세밀하게.
     //TODO: 두바퀴를 돌아 circle queue처럼 보이게.
     //TODO: 시작 시점은 기록하고 그 시점부터 탐색 시작해야함.
@@ -194,12 +189,10 @@ pick_thread_upage_to_swap (struct thread **t, void** upage)
             *upage = entry->upage;
             clock_hand = entry;
             lock_release (&frame_table_lock);
-            printf("리턴은 햇냐?");
             return true;
         }
         pagedir_set_accessed (pd, entry->upage, false);
     }
-    printf("첫번째\n");
     for (e = list_begin (&frame_table); e != list_end (&frame_table);
          e = list_next (e))
     {
@@ -218,7 +211,6 @@ pick_thread_upage_to_swap (struct thread **t, void** upage)
         }
         pagedir_set_accessed (pd, entry->upage, false);
     }
-    printf("두번째\n");
     for (e = list_begin (&frame_table); e != &clock_hand->elem;
          e = list_next (e))
     {
@@ -237,7 +229,6 @@ pick_thread_upage_to_swap (struct thread **t, void** upage)
         }
         pagedir_set_accessed (pd, entry->upage, false);
     }
-    printf("세번째\n");
     lock_release (&frame_table_lock);
     return false;
 }

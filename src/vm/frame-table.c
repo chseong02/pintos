@@ -7,13 +7,6 @@
 #include "userprog/pagedir.h"
 #include "threads/interrupt.h"
 
-static struct list frame_table;
-static struct lock frame_table_lock;
-static struct frame_table_entry *clock_hand;
-
-static struct frame_table_entry*
-find_frame_table_entry_from_frame_wo_lock (void *frame);
-
 struct frame_table_entry
 {
     tid_t tid;
@@ -23,6 +16,17 @@ struct frame_table_entry
     bool use_flag;
     struct list_elem elem;
 };
+
+static struct list frame_table;
+static struct lock frame_table_lock;
+static struct frame_table_entry *clock_hand;
+
+static struct frame_table_entry*
+find_frame_table_entry_from_upage (void *upage);
+static struct frame_table_entry*
+find_frame_table_entry_from_frame (void *frame);
+static struct frame_table_entry*
+find_frame_table_entry_from_frame_wo_lock (void *frame);
 
 void
 frame_table_init (void)
@@ -54,12 +58,8 @@ falloc_get_frame_w_upage (enum falloc_flags flags, void *upage)
             _palloc_flags |= PAL_ASSERT;
         kpage = palloc_get_page (_palloc_flags);
         lock_release(&frame_table_lock);
-        //intr_set_level (old_level);
         if (!kpage)
-        {
             return kpage;
-        }
-            
     }
 
     entry = malloc (sizeof *entry);
@@ -171,21 +171,14 @@ falloc_free_frame_from_frame (void *frame)
 bool
 pick_thread_upage_to_swap (struct thread **t, void** upage)
 {
-    //lock_acquire (&frame_table_lock);
     struct list_elem *e;
 
     if (clock_hand == NULL)
     {
         clock_hand = list_entry (list_begin (&frame_table), struct frame_table_entry, elem);
         if (&clock_hand->elem == list_end (&frame_table))
-        {
-            //lock_release (&frame_table_lock);
             return false;
-        }
     }
-    //TODO: lock 관리 더 세밀하게.
-    //TODO: 두바퀴를 돌아 circle queue처럼 보이게.
-    //TODO: 시작 시점은 기록하고 그 시점부터 탐색 시작해야함.
     for (e = &clock_hand->elem; e != list_end (&frame_table);
          e = list_next (e))
     {
@@ -201,7 +194,6 @@ pick_thread_upage_to_swap (struct thread **t, void** upage)
             *t = entry->thread;
             *upage = entry->upage;
             clock_hand = entry;
-            //lock_release (&frame_table_lock);
             return true;
         }
         pagedir_set_accessed (pd, entry->upage, false);
@@ -221,7 +213,6 @@ pick_thread_upage_to_swap (struct thread **t, void** upage)
             *t = entry->thread;
             *upage = entry->upage;
             clock_hand = entry;
-            //lock_release (&frame_table_lock);
             return true;
         }
         pagedir_set_accessed (pd, entry->upage, false);
@@ -241,37 +232,31 @@ pick_thread_upage_to_swap (struct thread **t, void** upage)
             *t = entry->thread;
             *upage = entry->upage;
             clock_hand = entry;
-            //lock_release (&frame_table_lock);
             return true;
         }
         pagedir_set_accessed (pd, entry->upage, false);
     }
-    //lock_release (&frame_table_lock);
     return false;
 }
 
-void free_frames ()
+void
+free_frames ()
 {
     struct list_elem *e;
-    struct thread *t = thread_current();
+    struct thread *t = thread_current ();
     for (e = list_begin (&frame_table); e != list_end (&frame_table);
          e = e)
     {
         struct frame_table_entry *entry = 
-            list_entry (e, struct frame_table_entry, elem);
-        
-        if(entry->thread==t)
+            list_entry (e, struct frame_table_entry, elem);   
+        if(entry->thread == t)
         {
-            e = list_remove(e);
-            free(entry);
-
+            e = list_remove (e);
+            free (entry);
         }
-        else{
+        else
             e = list_next (e);
-        }
-        
     }
-
 }
 
 void
@@ -303,9 +288,7 @@ find_frame_table_entry_from_frame_wo_lock (void *frame)
         struct frame_table_entry *entry = 
             list_entry (e, struct frame_table_entry, elem);
         if (entry->kpage == frame)
-        {
             return entry;
-        }
     }
     return NULL;
 }

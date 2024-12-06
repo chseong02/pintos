@@ -6,6 +6,8 @@
 #include "threads/vaddr.h"
 #include "threads/palloc.h"
 #include "userprog/process.h"
+#include "vm/frame-table.h"
+#include "vm/s-page-table.h"
 #include <list.h>
 
 static void syscall_handler (struct intr_frame *);
@@ -27,6 +29,8 @@ static int sys_write (int fd, const void *buffer, unsigned size);
 static void sys_seek (int fd, unsigned position);
 static unsigned sys_tell (int fd);
 static void sys_close (int fd);
+static mapid_t sys_mmap (int fd, void *addr);
+static void sys_munmap (mapid_t mapping);
 
  	
 /* Reads a byte at user virtual address UADDR.
@@ -158,6 +162,14 @@ syscall_handler (struct intr_frame *f)
     case SYS_CLOSE:
       get_args (f->esp, arg, 1);
       sys_close (arg[0]);
+      break;
+    case SYS_MMAP:
+      get_args (f->esp, arg, 2);
+      f->eax = sys_mmap (arg[0], (void *) arg[1]);
+      break;
+    case SYS_MUNMAP:
+      get_args (f->esp, arg, 1);
+      sys_munmap ((mapid_t)arg[0]);
       break;
     default:
       sys_exit (-1);
@@ -440,4 +452,123 @@ sys_close(int fd)
   }
 
   remove_fd(cur, fd);
+}
+
+static mapid_t
+sys_mmap (int fd, void *addr)
+{
+  /* check file validity */
+  int file_size = sys_filesize(fd);
+  if(file_size <= 0)
+  {
+    /* zero or error */
+    return MAP_FAILED;
+  }
+
+  /* check address align */
+  if(addr == NULL || (int)addr % PGSIZE)
+  {
+    return MAP_FAILED;
+  }
+
+  /* check if page already exists in range */
+  for(int i = 0; i < file_size; i += PGSIZE)
+  {
+    if(find_s_page_table_entry_from_upage(addr + i) != NULL)
+    {
+      return MAP_FAILED;
+    }
+  }
+
+  file_lock_acquire();
+
+  /* open same file again because original file can be 
+     closed after mmap but mmap should stay */
+  struct process *cur = thread_current()->process_ptr;
+  struct file *f = cur->fd_table[fd].file;
+  struct file *new_f = file_reopen(f);
+  if(new_f == NULL)
+  {
+    file_lock_release();
+    return MAP_FAILED;
+  }
+
+  /* allocate mapping data & setup */
+  struct fmm_data *fmm = malloc(sizeof(struct fmm_data));
+  if(fmm == NULL)
+  {
+    file_lock_release();
+    return MAP_FAILED;
+  }
+  fmm->id = cur->mmap_count++;
+  fmm->file = new_f;
+  fmm->file_size = file_size;
+  fmm->page_count = 0;
+  fmm->upage = addr;
+
+  /* set page table for every pages in range */
+  for(int i = 0; i < file_size; i += PGSIZE)
+  {
+    int page_data_size = file_size - i >= PGSIZE ? PGSIZE : file_size - i;
+    s_page_table_add(true, new_f, i, true, addr + i, NULL, 
+    page_data_size, PGSIZE - page_data_size, FAL_USER);
+    fmm->page_count++;
+  }
+
+  /* add mapping data to list */
+  list_push_back(&(cur->fmm_data_list), &(fmm->fmm_data_list_elem));
+
+  file_lock_release();
+    
+  /* Create new struct fmm_data, initialize it and push into the list */
+  /* allocate new mapid for new fmm */
+  return fmm->id;
+}
+
+static void
+sys_munmap (mapid_t mapping)
+{
+  struct process *cur = thread_current()->process_ptr;
+  struct list *fmm_list = &(cur->fmm_data_list);
+
+  struct fmm_data *found_entry = NULL;
+  struct list_elem *e;
+
+  file_lock_acquire();
+
+  /* search for mapping with (id: mapping) in list */
+  for(e = list_begin(fmm_list); e != list_end(fmm_list); e = list_next(e))
+	{
+		struct fmm_data *entry = list_entry(e, struct fmm_data, fmm_data_list_elem);
+    if(entry->id == mapping)
+    {
+      found_entry = entry;
+      break;
+    }
+	}
+
+  /* mapping not found */
+  if(found_entry == NULL)
+  {
+    file_lock_release();
+    return;
+  }
+
+  /* free each s_page entry. modify original file if dirty_bit is on. */
+  for(int i = 0; i < found_entry->file_size; i += PGSIZE)
+  {
+    struct s_page_table_entry *s_page 
+      = find_s_page_table_entry_from_upage(found_entry->upage + i);
+    if(s_page->is_dirty)
+    {
+      void *page = pagedir_get_page(thread_current()->pagedir, found_entry->upage);
+      file_write_at(s_page->file, page, s_page->file_read_bytes, s_page->file_ofs);
+    }
+    s_page_table_delete_from_upage(found_entry->upage + i);
+  }
+
+  /* remove entry from mapping list */
+  list_remove(e);
+
+  file_lock_release();
 }

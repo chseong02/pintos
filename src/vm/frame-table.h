@@ -18,5 +18,5 @@ void falloc_free_frame_from_upage (void *upage);
 void falloc_free_frame_from_frame (void *frame);
 void falloc_free_frame_from_frame_wo_lock (void *frame);
 bool pick_thread_upage_to_swap (struct thread **t, void** upage);
-
+void free_frame_table_entry_about_current_thread (void);
 #endif /* vm/frame-table.h */

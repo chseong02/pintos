@@ -52,7 +52,7 @@ falloc_get_frame_w_upage (enum falloc_flags flags, void *upage)
     kpage = palloc_get_page (_palloc_flags);
     if (!kpage)
     {        
-        lock_acquire(&frame_table_lock);
+        lock_acquire (&frame_table_lock);
         page_swap_out ();
         if (flags & FAL_ASSERT)
             _palloc_flags |= PAL_ASSERT;
@@ -240,7 +240,7 @@ pick_thread_upage_to_swap (struct thread **t, void** upage)
 }
 
 void
-free_frames ()
+free_frame_table_entry_about_current_thread ()
 {
     struct list_elem *e;
     struct thread *t = thread_current ();

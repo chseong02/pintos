@@ -5,6 +5,7 @@
 #include "threads/malloc.h"
 #include <list.h>
 #include "userprog/pagedir.h"
+#include "threads/interrupt.h"
 
 static struct list frame_table;
 static struct lock frame_table_lock;
@@ -42,11 +43,15 @@ falloc_get_frame_w_upage (enum falloc_flags flags, void *upage)
 
     kpage = palloc_get_page (_palloc_flags);
     if (!kpage)
-    {
+    {        
+        enum intr_level old_level;
+        old_level = intr_disable ();
+        
         page_swap_out ();
         if (flags & FAL_ASSERT)
             _palloc_flags |= PAL_ASSERT;
         kpage = palloc_get_page (_palloc_flags);
+        intr_set_level (old_level);
         if (!kpage)
             return kpage;
     }

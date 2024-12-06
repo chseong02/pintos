@@ -36,7 +36,17 @@ struct process
   struct semaphore exec_load_sema;
   struct file *file_exec;
   struct fd_table_entry fd_table[OPEN_MAX];
+  struct list fmm_data_list;
 };
+
+struct fmm_data
+{
+  mapid_t id;
+  struct file *file;
+
+  struct list page_list;
+  struct list_elem fmm_data_list_elem;
+}
 
 void init_process (struct process*);
 

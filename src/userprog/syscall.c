@@ -27,6 +27,8 @@ static int sys_write (int fd, const void *buffer, unsigned size);
 static void sys_seek (int fd, unsigned position);
 static unsigned sys_tell (int fd);
 static void sys_close (int fd);
+static mapid_t sys_mmap (int fd, void *addr);
+static void sys_munmap (mapid_t mapping);
 
  	
 /* Reads a byte at user virtual address UADDR.
@@ -158,6 +160,14 @@ syscall_handler (struct intr_frame *f)
     case SYS_CLOSE:
       get_args (f->esp, arg, 1);
       sys_close (arg[0]);
+      break;
+    case SYS_MMAP:
+      get_args (f->esp, arg, 2);
+      f->eax = sys_mmap (arg[0], (void *) arg[1]);
+      break;
+    case SYS_MUNMAP:
+      get_args (f->esp, arg, 1);
+      sys_munmap ((mapid_t)arg[0]);
       break;
     default:
       sys_exit (-1);
@@ -440,4 +450,57 @@ sys_close(int fd)
   }
 
   remove_fd(cur, fd);
+}
+
+static mapid_t
+sys_mmap (int fd, void *addr)
+{
+  /* check file validity */
+  int file_size = sys_filesize(fd);
+  if(file_size <= 0)
+  {
+    /* zero or error */
+    return MAP_FAILED;
+  }
+
+  /* check address align */
+  if(addr == NULL || addr % PGSIZE)
+  {
+    return MAP_FAILED;
+  }
+
+  /* check if page already exists in range */
+  for(off_t i = 0; i < file_size; i += PGSIZE)
+  {
+    if(find_s_page_table_entry_from_upage(addr + i) != NULL)
+    {
+      return MAP_FAILED;
+    }
+  }
+
+  /* open same file again because original file can be 
+     closed after mmap but mmap should stay */
+  struct process *cur = thread_current()->process_ptr;
+  file *f = cur->fd_table[fd].file;
+  file *new_f = file_reopen(f);
+  if(new_f == NULL)
+  {
+    return MAP_FAILED;
+  }
+
+  for(off_t i = 0; i < file_size; i += PGSIZE)
+  {
+    off_t page_data_size = file_size - i >= PGSIZE ? PGSIZE : file_size - i;
+    s_page_table_add(true, new_f, i, true, addr + i, NULL, page_data_size, PGSIZE - page_data_size, )
+  }
+    
+  /* Create new struct fmm_data, initialize it and push into the list */
+  /* allocate new mapid for new fmm */
+  return mapid;
+}
+
+static void
+sys_munmap (mapid_t mapping)
+{
+
 }

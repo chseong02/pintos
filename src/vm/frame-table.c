@@ -32,6 +32,7 @@ frame_table_init (void)
 void*
 falloc_get_frame_w_upage (enum falloc_flags flags, void *upage)
 {
+        
     void *kpage;
     struct frame_table_entry *entry;
     enum palloc_flags _palloc_flags = 000;
@@ -44,16 +45,19 @@ falloc_get_frame_w_upage (enum falloc_flags flags, void *upage)
     kpage = palloc_get_page (_palloc_flags);
     if (!kpage)
     {        
-        enum intr_level old_level;
-        old_level = intr_disable ();
+        //enum intr_level old_level;
+        //old_level = intr_disable ();
         
         page_swap_out ();
         if (flags & FAL_ASSERT)
             _palloc_flags |= PAL_ASSERT;
         kpage = palloc_get_page (_palloc_flags);
-        intr_set_level (old_level);
+        //intr_set_level (old_level);
         if (!kpage)
+        {
             return kpage;
+        }
+            
     }
 
     entry = malloc (sizeof *entry);
@@ -187,6 +191,8 @@ pick_thread_upage_to_swap (struct thread **t, void** upage)
             list_entry (e, struct frame_table_entry, elem);
         
         uint32_t *pd = entry->thread->pagedir;
+        if(!pagedir_get_page(pd,entry->upage))
+            continue;
         bool is_accessed = pagedir_is_accessed (pd, entry->upage);
         if (!is_accessed)
         {
@@ -205,6 +211,8 @@ pick_thread_upage_to_swap (struct thread **t, void** upage)
             list_entry (e, struct frame_table_entry, elem);
         
         uint32_t *pd = entry->thread->pagedir;
+                if(!pagedir_get_page(pd,entry->upage))
+            continue;
         bool is_accessed = pagedir_is_accessed (pd, entry->upage);
         if (!is_accessed)
         {
@@ -223,6 +231,8 @@ pick_thread_upage_to_swap (struct thread **t, void** upage)
             list_entry (e, struct frame_table_entry, elem);
         
         uint32_t *pd = entry->thread->pagedir;
+                if(!pagedir_get_page(pd,entry->upage))
+            continue;
         bool is_accessed = pagedir_is_accessed (pd, entry->upage);
         if (!is_accessed)
         {
@@ -236,4 +246,28 @@ pick_thread_upage_to_swap (struct thread **t, void** upage)
     }
     lock_release (&frame_table_lock);
     return false;
+}
+
+void free_frames ()
+{
+    struct list_elem *e;
+    struct thread *t = thread_current();
+    for (e = list_begin (&frame_table); e != list_end (&frame_table);
+         e = e)
+    {
+        struct frame_table_entry *entry = 
+            list_entry (e, struct frame_table_entry, elem);
+        
+        if(entry->thread==t)
+        {
+            e = list_remove(e);
+            free(entry);
+
+        }
+        else{
+            e = list_next (e);
+        }
+        
+    }
+
 }

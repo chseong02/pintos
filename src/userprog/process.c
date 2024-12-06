@@ -19,6 +19,7 @@
 #include "threads/vaddr.h"
 #include "lib/user/syscall.h"
 #include "vm/s-page-table.h"
+#include "vm/frame-table.h"
 
 /*---------------------------------------------------------------------------*/
 /* Process Control Block */
@@ -323,6 +324,7 @@ process_exit (void)
          directory before destroying the process's page
          directory, or our active page directory will be one
          that's been freed (and cleared). */
+      free_frames();
       cur->pagedir = NULL;
       pagedir_activate (NULL);
       pagedir_destroy (pd);
@@ -653,6 +655,7 @@ setup_stack (void **esp)
         falloc_free_frame_from_frame (kpage);
       }
     }
+    
   return success;
 }
 

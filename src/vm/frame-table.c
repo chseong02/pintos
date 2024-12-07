@@ -41,7 +41,7 @@ frame_table_init (void)
 void*
 falloc_get_frame_w_upage (enum falloc_flags flags, void *upage)
 {
-        
+        lock_acquire (&frame_table_lock);
     void *kpage;
     struct frame_table_entry *entry;
     enum palloc_flags _palloc_flags = 000;
@@ -54,14 +54,18 @@ falloc_get_frame_w_upage (enum falloc_flags flags, void *upage)
     kpage = palloc_get_page (_palloc_flags);
     if (!kpage)
     {        
-        lock_acquire (&frame_table_lock);
+        
         page_swap_out ();
         if (flags & FAL_ASSERT)
             _palloc_flags |= PAL_ASSERT;
         kpage = palloc_get_page (_palloc_flags);
-        lock_release(&frame_table_lock);
+        
         if (!kpage)
+        {
+            lock_release(&frame_table_lock);
             return kpage;
+        }
+            
     }
 
     entry = malloc (sizeof *entry);
@@ -69,6 +73,7 @@ falloc_get_frame_w_upage (enum falloc_flags flags, void *upage)
     {
         printf("혹시???");
         palloc_free_page (kpage);
+        lock_release(&frame_table_lock);
         if (flags & FAL_ASSERT)
             PANIC ("NO Memory for Frame Table Entry!");
         return NULL;
@@ -80,7 +85,6 @@ falloc_get_frame_w_upage (enum falloc_flags flags, void *upage)
     entry->kpage = kpage;
     entry->use_flag = false;
 
-    lock_acquire (&frame_table_lock);
     list_push_back (&frame_table, &entry->elem);
     lock_release (&frame_table_lock);
     return kpage;

@@ -510,7 +510,7 @@ sys_mmap (int fd, void *addr)
   for(int i = 0; i < file_size; i += PGSIZE)
   {
     int page_data_size = file_size - i >= PGSIZE ? PGSIZE : file_size - i;
-    s_page_table_add(true, new_f, i, true, addr + i, NULL, 
+    s_page_table_file_add(addr + i, true, new_f, i, 
     page_data_size, PGSIZE - page_data_size, FAL_USER);
     fmm->page_count++;
   }
@@ -559,9 +559,9 @@ sys_munmap (mapid_t mapping)
   {
     struct s_page_table_entry *s_page 
       = find_s_page_table_entry_from_upage(found_entry->upage + i);
-    if(s_page->is_dirty)
+    if(pagedir_is_dirty(thread_current()->pagedir, found_entry->upage + i))
     {
-      void *page = pagedir_get_page(thread_current()->pagedir, found_entry->upage);
+      void *page = pagedir_get_page(thread_current()->pagedir, found_entry->upage + i);
       file_write_at(s_page->file, page, s_page->file_read_bytes, s_page->file_ofs);
     }
     s_page_table_delete_from_upage(found_entry->upage + i);
@@ -569,6 +569,7 @@ sys_munmap (mapid_t mapping)
 
   /* remove entry from mapping list */
   list_remove(e);
+  free(found_entry);
 
   file_lock_release();
 }

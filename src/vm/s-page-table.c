@@ -1,6 +1,7 @@
 #include "vm/s-page-table.h"
 #include "threads/malloc.h"
 #include "threads/thread.h"
+#include "vm/swap-table.h"
 
 static unsigned s_page_table_hash_func (const struct hash_elem *, void *);
 static bool s_page_table_hash_less_func (const struct hash_elem *, 
@@ -135,7 +136,12 @@ static void
 s_page_table_hash_free_action_func (struct hash_elem *e, void *aux)
 {
     struct s_page_table_entry *entry = hash_entry (e, struct s_page_table_entry, elem);
-    entry->present = false;
+    if(entry->in_swap)
+	{
+		delete_swap_entry(entry->swap_idx);
+	}
+	entry->present = false;
+	
 	hash_delete (&(thread_current())->s_page_table, &entry->elem);
 	free (entry);
 }

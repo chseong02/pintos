@@ -79,3 +79,20 @@ swap_in (size_t swap_idx, void* frame)
     lock_release (&swap_table.lock);
     return true;
 }
+
+bool
+delete_swap_entry (size_t swap_idx)
+{
+    block_sector_t page_start_sector_idx;
+    lock_acquire (&swap_table.lock);
+    if (!bitmap_test (swap_table.used_map, swap_idx))
+    {
+        lock_release (&swap_table.lock);
+        return false;
+    }
+
+    bitmap_set_multiple (swap_table.used_map, swap_idx, 
+        1, false);
+    lock_release (&swap_table.lock);
+    return true;
+}

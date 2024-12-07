@@ -213,6 +213,12 @@ sys_exit (int status)
       remove_fd (cur->process_ptr, i);
     }
   }
+
+  /* naive free logic for mmap on exit */
+  for(mapid_t i = 0; i < cur->process_ptr->mmap_count; i++){
+    sys_munmap(i);
+  }
+  
   sema_up (&(cur->process_ptr->exit_code_sema));
   thread_exit ();
   NOT_REACHED ();

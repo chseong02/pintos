@@ -174,7 +174,7 @@ page_fault (struct intr_frame *f)
       sys_exit (-1);
    
    bool success = make_page_binded (upage);
-   printf(success);
+   printf("%d",success);
    if (!success)
       sys_exit (-1);
    return;

@@ -34,7 +34,7 @@ bool is_valid_stack_address_heuristic (void *fault_addr, void *esp)
 
 bool make_more_binded_stack_space (void *uaddr)
 {
-    printf("몰 스택\n");
+    printf("call stack\n");
     void *upage = pg_round_down (uaddr);
     uint8_t *kpage;
     bool success = false;

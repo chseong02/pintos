@@ -142,9 +142,9 @@ falloc_free_frame_from_upage (void *upage)
             clock_hand = list_entry(next, struct frame_table_entry, elem);
     }
     list_remove (&entry->elem);
-    lock_release (&frame_table_lock);
     palloc_free_page (entry->kpage);
     free (entry);
+    lock_release (&frame_table_lock);
 }
 
 void
@@ -163,9 +163,10 @@ falloc_free_frame_from_frame (void *frame)
             clock_hand = list_entry(next, struct frame_table_entry, elem);
     }
     list_remove (&entry->elem);
-    lock_release (&frame_table_lock);
+    
     palloc_free_page (entry->kpage);
     free (entry);  
+    lock_release (&frame_table_lock);
 }
 
 bool
@@ -242,22 +243,24 @@ pick_thread_upage_to_swap (struct thread **t, void** upage)
 void
 free_frame_table_entry_about_current_thread ()
 {
+    lock_acquire(&frame_table_lock);
     struct list_elem *e;
     struct thread *t = thread_current ();
+    
     for (e = list_begin (&frame_table); e != list_end (&frame_table);
          e = e)
     {
         struct frame_table_entry *entry = 
             list_entry (e, struct frame_table_entry, elem);   
+        e = list_next (e);
         if(entry->thread == t)
         {
             //e = list_remove (e);
-            falloc_free_frame_from_frame(entry->kpage);
+            falloc_free_frame_from_frame_wo_lock(entry->kpage);
             //free (entry);
         }
-        else
-            e = list_next (e);
     }
+    lock_release(&frame_table_lock);
 }
 
 void

@@ -27,6 +27,8 @@ static struct frame_table_entry*
 find_frame_table_entry_from_frame (void *frame);
 static struct frame_table_entry*
 find_frame_table_entry_from_frame_wo_lock (void *frame);
+static struct frame_table_entry*
+find_frame_table_entry_from_upage_wo_lock (void *upage);
 
 void
 frame_table_init (void)
@@ -128,11 +130,12 @@ find_frame_table_entry_from_frame (void *frame)
 void
 falloc_free_frame_from_upage (void *upage)
 {
-    struct frame_table_entry *entry = find_frame_table_entry_from_upage (upage);
+    lock_acquire (&frame_table_lock);
+    struct frame_table_entry *entry = find_frame_table_entry_from_upage_wo_lock (upage);
     if (!entry)
         return;
     
-    lock_acquire (&frame_table_lock);
+    
     if (clock_hand == entry)
     {
         struct list_elem *next = list_next (&entry->elem);
@@ -150,10 +153,11 @@ falloc_free_frame_from_upage (void *upage)
 void
 falloc_free_frame_from_frame (void *frame)
 {
-    struct frame_table_entry *entry = find_frame_table_entry_from_frame (frame);
+    lock_acquire (&frame_table_lock);
+    struct frame_table_entry *entry = find_frame_table_entry_from_frame_wo_lock (frame);
     if (!entry)
         return;
-    lock_acquire (&frame_table_lock);
+    
     if (clock_hand == entry)
     {
         struct list_elem *next = list_next (&entry->elem);
@@ -252,12 +256,15 @@ free_frame_table_entry_about_current_thread ()
     {
         struct frame_table_entry *entry = 
             list_entry (e, struct frame_table_entry, elem);   
-        e = list_next (e);
+        
         if(entry->thread == t)
         {
-            //e = list_remove (e);
-            falloc_free_frame_from_frame_wo_lock(entry->kpage);
-            //free (entry);
+            e = list_remove (e);
+            //falloc_free_frame_from_frame_wo_lock(entry->kpage);
+            free (entry);
+        }
+        else{
+e = list_next (e);
         }
     }
     lock_release(&frame_table_lock);
@@ -292,6 +299,21 @@ find_frame_table_entry_from_frame_wo_lock (void *frame)
         struct frame_table_entry *entry = 
             list_entry (e, struct frame_table_entry, elem);
         if (entry->kpage == frame)
+            return entry;
+    }
+    return NULL;
+}
+
+static struct frame_table_entry*
+find_frame_table_entry_from_upage_wo_lock (void *upage)
+{
+    struct list_elem *e;
+    for (e = list_begin (&frame_table); e != list_end (&frame_table); 
+        e = list_next (e))
+    {
+        struct frame_table_entry *entry = 
+            list_entry (e, struct frame_table_entry, elem);
+        if (entry->upage == upage)
             return entry;
     }
     return NULL;

@@ -167,6 +167,7 @@ page_fault (struct intr_frame *f)
          if (make_more_binded_stack_space (fault_addr))
             return;
       }
+      printf("IS VALID STACK GROWTH?:%d, %p, %p\n",is_valid_stack_address_heuristic (fault_addr, esp),fault_addr,esp);
       sys_exit (-3);
    }
    if (!is_writable_page (upage) && write)

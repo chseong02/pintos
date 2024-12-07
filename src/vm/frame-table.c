@@ -67,6 +67,7 @@ falloc_get_frame_w_upage (enum falloc_flags flags, void *upage)
     entry = malloc (sizeof *entry);
     if (!entry)
     {
+        printf("혹시???");
         palloc_free_page (kpage);
         if (flags & FAL_ASSERT)
             PANIC ("NO Memory for Frame Table Entry!");

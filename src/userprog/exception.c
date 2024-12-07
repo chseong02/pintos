@@ -153,7 +153,7 @@ page_fault (struct intr_frame *f)
 
    /* Kernel caused page fault by accessing user memory */
    if(user && !check_ptr_in_user_space (fault_addr))
-      sys_exit (-1);
+      sys_exit (-2);
    /* User caused page fault */
    void* upage = find_page_from_uaddr (fault_addr);
    if (!upage)
@@ -167,14 +167,14 @@ page_fault (struct intr_frame *f)
          if (make_more_binded_stack_space (fault_addr))
             return;
       }
-      sys_exit (-1);
+      sys_exit (-3);
    }
    if (!is_writable_page (upage) && write)
-      sys_exit (-1);
+      sys_exit (-4);
    
    bool success = make_page_binded (upage);
    if (!success)
-      sys_exit (-1);
+      sys_exit (-5);
    return;
    /* To implement virtual memory, delete the rest of the function
       body, and replace it with code that brings in the page to

@@ -153,7 +153,7 @@ page_fault (struct intr_frame *f)
 
    /* Kernel caused page fault by accessing user memory */
    if(user && !check_ptr_in_user_space (fault_addr))
-      sys_exit (-2);
+      sys_exit (-1);
    /* User caused page fault */
    void* upage = find_page_from_uaddr (fault_addr);
    if (!upage)
@@ -167,15 +167,15 @@ page_fault (struct intr_frame *f)
          if (make_more_binded_stack_space (fault_addr))
             return;
       }
-      printf("IS VALID STACK GROWTH?:%d, %p, %p\n",is_valid_stack_address_heuristic (fault_addr, esp),fault_addr,esp);
-      sys_exit (-3);
+      //printf("IS VALID STACK GROWTH?:%d, %p, %p\n",is_valid_stack_address_heuristic (fault_addr, esp),fault_addr,esp);
+      sys_exit (-1);
    }
    if (!is_writable_page (upage) && write)
-      sys_exit (-4);
+      sys_exit (-1);
    
    bool success = make_page_binded (upage);
    if (!success)
-      sys_exit (-5);
+      sys_exit (-1);
    return;
    /* To implement virtual memory, delete the rest of the function
       body, and replace it with code that brings in the page to

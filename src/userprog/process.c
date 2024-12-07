@@ -325,6 +325,7 @@ process_exit (void)
          directory, or our active page directory will be one
          that's been freed (and cleared). */
       free_frame_table_entry_about_current_thread ();
+      free_s_page_table ();
       cur->pagedir = NULL;
       pagedir_activate (NULL);
       pagedir_destroy (pd);

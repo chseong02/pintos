@@ -130,3 +130,20 @@ find_s_page_table_entry_from_thread_upage (struct thread *t, void* upage)
 		return NULL;
 	return hash_entry (finded_elem, struct s_page_table_entry, elem);
 }
+
+static void
+s_page_table_hash_free_action_func (struct hash_elem *e, void *aux)
+{
+    struct s_page_table_entry *entry = hash_entry (e, struct s_page_table_entry, elem);
+    entry->present = false;
+	hash_delete (&(thread_current())->s_page_table, &entry->elem);
+	free (entry);
+}
+
+void
+free_s_page_table (void)
+{
+    struct thread *thread = thread_current ();
+
+    hash_clear (&thread->s_page_table,s_page_table_hash_free_action_func);
+}

@@ -45,3 +45,5 @@ void s_page_table_delete_from_upage (void *upage);
 struct s_page_table_entry* find_s_page_table_entry_from_upage (void *);
 struct s_page_table_entry* find_s_page_table_entry_from_thread_upage 
 	(struct thread *t, void* upage);
+
+void free_s_page_table (void);

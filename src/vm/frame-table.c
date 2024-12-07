@@ -252,7 +252,7 @@ free_frame_table_entry_about_current_thread ()
         if(entry->thread == t)
         {
             //e = list_remove (e);
-            falloc_free_frame_from_frame_wo_lock(entry->kpage);
+            falloc_free_frame_from_frame(entry->kpage);
             //free (entry);
         }
         else

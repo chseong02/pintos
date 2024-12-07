@@ -111,7 +111,7 @@ s_page_table_delete_from_upage (void *upage)
     struct thread *thread = thread_current ();
 
     entry = find_s_page_table_entry_from_upage (upage);
-    if (entry)
+    if (!entry)
         return;
 
     entry->present = false;

@@ -38,7 +38,11 @@ s_page_table_add (bool is_lazy, struct file *file, off_t file_ofs,
 {
     struct s_page_table_entry *entry = malloc (sizeof *entry);
     if (!entry)
-        return false;
+	{
+		printf("May be you.\n");
+return false;
+	}
+        
 
     if (find_s_page_table_entry_from_upage (upage))
 	{

@@ -324,11 +324,12 @@ process_exit (void)
          directory before destroying the process's page
          directory, or our active page directory will be one
          that's been freed (and cleared). */
+      
+      free_frame_table_entry_about_current_thread ();
+      free_s_page_table ();
       cur->pagedir = NULL;
       pagedir_activate (NULL);
       pagedir_destroy (pd);
-      free_frame_table_entry_about_current_thread ();
-      free_s_page_table ();
     }
 }
 
@@ -471,7 +472,10 @@ load (const char *file_name, void (**eip) (void), void **esp)
       file_seek (file, file_ofs);
 
       if (file_read (file, &phdr, sizeof phdr) != sizeof phdr)
-        goto done;
+      {
+goto done;
+      }
+        
       file_ofs += sizeof phdr;
       switch (phdr.p_type) 
         {
@@ -511,7 +515,10 @@ load (const char *file_name, void (**eip) (void), void **esp)
                 }
               if (!load_segment (file, file_page, (void *) mem_page,
                                  read_bytes, zero_bytes, writable))
-                goto done;
+                                 {
+                                  goto done;
+                                 }
+                
             }
           else
             goto done;
@@ -521,7 +528,10 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
   /* Set up stack. */
   if (!setup_stack (esp))
-    goto done;
+  {
+goto done;
+  }
+    
 
   /* Start address. */
   *eip = (void (*) (void)) ehdr.e_entry;
@@ -656,7 +666,6 @@ setup_stack (void **esp)
         falloc_free_frame_from_frame (kpage);
       }
     }
-    
   return success;
 }
 
@@ -717,11 +726,13 @@ init_process (struct process *p)
 void
 file_lock_acquire (void)
 {
-  if (file_lock.holder == thread_current())
-  {
-    file_lock_shares += 1;
-    return;
-  }
+  
+  // if (file_lock.holder == thread_current())
+  // {
+  //   printf("설마?\n");
+  //   file_lock_shares += 1;
+  //   return;
+  // }
   lock_acquire (&file_lock);
 }
 
@@ -729,11 +740,6 @@ file_lock_acquire (void)
 void
 file_lock_release (void)
 {
-  if (file_lock_shares > 0)
-  {
-    file_lock_shares -= 1;
-    return;
-  }
   lock_release (&file_lock);
 }
 

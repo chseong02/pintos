@@ -34,7 +34,6 @@ bool is_valid_stack_address_heuristic (void *fault_addr, void *esp)
 
 bool make_more_binded_stack_space (void *uaddr)
 {
-    printf("call stack\n");
     void *upage = pg_round_down (uaddr);
     uint8_t *kpage;
     bool success = false;
@@ -84,15 +83,21 @@ bool make_page_binded (void *upage)
             return false;
         }
         // File Lazy Loading
+        file_lock_acquire();
         uint8_t *kpage = falloc_get_frame_w_upage (entry->flags, entry->upage);
+
         if (!kpage)
+        {
+            file_lock_release();
             return false;
+        }
+            
         struct file *file = entry->file; 
         off_t ofs = entry->file_ofs;
         off_t page_read_bytes = entry->file_read_bytes;
         off_t page_zero_bytes = entry->file_zero_bytes;
         off_t writable = entry->writable;
-        file_lock_acquire();
+
         // We don't have to `file_open`, because It's not closed.
         file_seek (file, ofs);
         /* Load this page. */
@@ -112,7 +117,6 @@ bool make_page_binded (void *upage)
         }
         entry->has_loaded = true;
         entry->kpage = kpage;
-        
         file_lock_release();
         return true;
     }
@@ -144,7 +148,6 @@ page_swap_out (void)
     {
         entry->has_loaded = false;
     }
-        
     void *kpage = entry->kpage;
     entry->kpage = NULL;
     falloc_free_frame_from_frame_wo_lock (kpage);

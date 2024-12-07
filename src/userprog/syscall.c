@@ -203,7 +203,6 @@ sys_exit (int status)
   struct thread *cur = thread_current ();
   printf ("%s: exit(%d)\n", cur->name, status);
   cur->process_ptr->exit_code = status;
-
   file_close (cur->process_ptr->file_exec);
   for (size_t i = 2; i < OPEN_MAX; i++)
   {

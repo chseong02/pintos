@@ -55,11 +55,11 @@ bool make_more_binded_stack_space (void *uaddr)
 
 bool make_page_binded (void *upage)
 {
-    //file_lock_acquire();
+    file_lock_acquire();
     struct s_page_table_entry *entry = find_s_page_table_entry_from_upage (upage);
     if (!entry || !entry->present)
     {
-        //file_lock_release();
+        file_lock_release();
         return false;
     }
         
@@ -68,7 +68,7 @@ bool make_page_binded (void *upage)
         void* frame = falloc_get_frame_w_upage (entry->flags, entry->upage);
         if (!frame)
         {
-            //file_lock_release();
+            file_lock_release();
             return false;
         }
             
@@ -78,11 +78,11 @@ bool make_page_binded (void *upage)
         if (!install_page (upage, frame, entry->writable)) 
         {
             falloc_free_frame_from_frame (frame);
-            //file_lock_release();
+            file_lock_release();
             return false; 
         }
         pagedir_set_dirty (thread_current()->pagedir,upage,true);
-        //file_lock_release();
+        file_lock_release();
         return true;
     }
     if (!entry->has_loaded)
@@ -91,7 +91,7 @@ bool make_page_binded (void *upage)
         if (!entry->file)
         {
             //TODO: Maybe for stack?
-           // file_lock_release();
+            file_lock_release();
             return false;
         }
         // File Lazy Loading
@@ -100,7 +100,7 @@ bool make_page_binded (void *upage)
 
         if (!kpage)
         {
-            //file_lock_release();
+            file_lock_release();
             return false;
         }
             
@@ -116,7 +116,7 @@ bool make_page_binded (void *upage)
         if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
         {
             falloc_free_frame_from_frame (kpage);
-            //file_lock_release();
+            file_lock_release();
             return false; 
         }
         memset (kpage + page_read_bytes, 0, page_zero_bytes);
@@ -124,15 +124,15 @@ bool make_page_binded (void *upage)
         if (!install_page (upage, kpage, writable)) 
         {
             falloc_free_frame_from_frame (kpage);
-            //file_lock_release();
+            file_lock_release();
             return false; 
         }
         entry->has_loaded = true;
         entry->kpage = kpage;
-        //file_lock_release();
+        file_lock_release();
         return true;
     }
-    //file_lock_release();
+    file_lock_release();
     return false;
 }
 

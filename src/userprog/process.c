@@ -727,12 +727,12 @@ void
 file_lock_acquire (void)
 {
   
-  // if (file_lock.holder == thread_current())
-  // {
-  //   printf("설마?\n");
-  //   file_lock_shares += 1;
-  //   return;
-  // }
+  if (file_lock.holder == thread_current())
+  {
+    //printf("설마?\n");
+    file_lock_shares += 1;
+    return;
+  }
   lock_acquire (&file_lock);
 }
 
@@ -740,6 +740,12 @@ file_lock_acquire (void)
 void
 file_lock_release (void)
 {
+    if (file_lock_shares>0)
+  {
+    //printf("설마?\n");
+    file_lock_shares -= 1;
+    return;
+  }
   lock_release (&file_lock);
 }
 

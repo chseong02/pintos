@@ -6,6 +6,7 @@
 static unsigned s_page_table_hash_func (const struct hash_elem *, void *);
 static bool s_page_table_hash_less_func (const struct hash_elem *, 
     const struct hash_elem *, void *);
+static void s_page_table_hash_free_action_func (struct hash_elem *e, void *aux);
 
 void
 init_s_page_table (void)
@@ -38,18 +39,14 @@ s_page_table_add (bool is_lazy, struct file *file, off_t file_ofs,
 {
     struct s_page_table_entry *entry = malloc (sizeof *entry);
     if (!entry)
-	{
-return false;
-	}
+		return false;
         
-
     if (find_s_page_table_entry_from_upage (upage))
 	{
 		free (entry);
 		return false;
 	}
         
-
     struct thread *thread = thread_current ();
     entry->present = true;
     entry->in_swap = false;
@@ -153,6 +150,5 @@ void
 free_s_page_table (void)
 {
     struct thread *thread = thread_current ();
-
     hash_clear (&thread->s_page_table,s_page_table_hash_free_action_func);
 }

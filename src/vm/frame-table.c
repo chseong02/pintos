@@ -41,7 +41,7 @@ frame_table_init (void)
 void*
 falloc_get_frame_w_upage (enum falloc_flags flags, void *upage)
 {
-        lock_acquire (&frame_table_lock);
+    lock_acquire (&frame_table_lock);
     void *kpage;
     struct frame_table_entry *entry;
     enum palloc_flags _palloc_flags = 000;
@@ -61,7 +61,6 @@ falloc_get_frame_w_upage (enum falloc_flags flags, void *upage)
         if (!kpage)
         {
             lock_release(&frame_table_lock);
-    
             return kpage;
         }
             
@@ -134,7 +133,6 @@ falloc_free_frame_from_upage (void *upage)
     struct frame_table_entry *entry = find_frame_table_entry_from_upage_wo_lock (upage);
     if (!entry)
         return;
-    
     
     if (clock_hand == entry)
     {
@@ -247,7 +245,7 @@ pick_thread_upage_to_swap (struct thread **t, void** upage)
 void
 free_frame_table_entry_about_current_thread ()
 {
-    lock_acquire(&frame_table_lock);
+    lock_acquire (&frame_table_lock);
     struct list_elem *e;
     struct thread *t = thread_current ();
     
@@ -260,10 +258,10 @@ free_frame_table_entry_about_current_thread ()
         if(entry->thread == t)
         {
             clock_hand = NULL;
-            falloc_free_frame_from_frame_wo_lock(entry->kpage);
+            falloc_free_frame_from_frame_wo_lock (entry->kpage);
         }
     }
-    lock_release(&frame_table_lock);
+    lock_release (&frame_table_lock);
 }
 
 void

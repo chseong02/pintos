@@ -472,9 +472,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
       file_seek (file, file_ofs);
 
       if (file_read (file, &phdr, sizeof phdr) != sizeof phdr)
-      {
-goto done;
-      }
+        goto done;
         
       file_ofs += sizeof phdr;
       switch (phdr.p_type) 
@@ -515,9 +513,7 @@ goto done;
                 }
               if (!load_segment (file, file_page, (void *) mem_page,
                                  read_bytes, zero_bytes, writable))
-                                 {
                                   goto done;
-                                 }
                 
             }
           else
@@ -528,10 +524,7 @@ goto done;
 
   /* Set up stack. */
   if (!setup_stack (esp))
-  {
-goto done;
-  }
-    
+    goto done;
 
   /* Start address. */
   *eip = (void (*) (void)) ehdr.e_entry;
@@ -729,7 +722,6 @@ file_lock_acquire (void)
   
   if (file_lock.holder == thread_current())
   {
-    //printf("설마?\n");
     file_lock_shares += 1;
     return;
   }
@@ -740,9 +732,8 @@ file_lock_acquire (void)
 void
 file_lock_release (void)
 {
-    if (file_lock_shares>0)
+  if (file_lock_shares>0)
   {
-    //printf("설마?\n");
     file_lock_shares -= 1;
     return;
   }

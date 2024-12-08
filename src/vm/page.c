@@ -13,8 +13,6 @@ void* find_page_from_uaddr (void *uaddr)
     struct s_page_table_entry *entry = find_s_page_table_entry_from_upage (upage);
     if (!entry)
         return NULL;
-    if (!entry->present)
-        return NULL;
     return entry->upage;
 }
 
@@ -57,7 +55,7 @@ bool make_page_binded (void *upage)
 {
     file_lock_acquire();
     struct s_page_table_entry *entry = find_s_page_table_entry_from_upage (upage);
-    if (!entry || !entry->present)
+    if (!entry)
     {
         file_lock_release();
         return false;

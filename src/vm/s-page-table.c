@@ -48,14 +48,11 @@ s_page_table_add (bool is_lazy, struct file *file, off_t file_ofs,
 	}
         
     struct thread *thread = thread_current ();
-    entry->present = true;
     entry->in_swap = false;
     entry->is_lazy = is_lazy;
     entry->has_loaded = !is_lazy;
 	
 	entry->writable = writable;
-	entry->is_dirty = false;
-	entry->is_accessed = false;
     
 	entry->file = file;
 	entry->file_ofs = file_ofs;
@@ -115,7 +112,6 @@ s_page_table_delete_from_upage (void *upage)
     if (!entry)
         return;
 
-    entry->present = false;
 	hash_delete (&thread->s_page_table, &entry->elem);
 	free (entry);
 }
@@ -140,7 +136,6 @@ s_page_table_hash_free_action_func (struct hash_elem *e, void *aux)
 	{
 		delete_swap_entry(entry->swap_idx);
 	}
-	entry->present = false;
 	
 	hash_delete (&(thread_current())->s_page_table, &entry->elem);
 	free (entry);

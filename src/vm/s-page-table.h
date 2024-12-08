@@ -6,14 +6,11 @@
 
 struct s_page_table_entry 
 {
-	bool present;
 	bool in_swap;
     bool is_lazy;
 	bool has_loaded;
 
 	bool writable;
-	bool is_dirty;
-	bool is_accessed;
 	
 	struct file* file;
 	off_t file_ofs;

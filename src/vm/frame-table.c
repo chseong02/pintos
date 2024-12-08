@@ -9,11 +9,9 @@
 
 struct frame_table_entry
 {
-    tid_t tid;
     struct thread* thread;
     void *upage;
     void *kpage;
-    bool use_flag;
     struct list_elem elem;
 };
 
@@ -74,11 +72,9 @@ falloc_get_frame_w_upage (enum falloc_flags flags, void *upage)
             PANIC ("NO Memory for Frame Table Entry!");
         return NULL;
     }
-    entry->tid = thread_current()->tid;
     entry->thread = thread_current ();
     entry->upage = upage;
     entry->kpage = kpage;
-    entry->use_flag = false;
     list_push_back (&frame_table, &entry->elem);
     lock_release (&frame_table_lock);
     return kpage;

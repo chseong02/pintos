@@ -646,6 +646,70 @@ sys_exit (int status)
 ### 6. Swap Table
 ### 7. On Process Termination
 
+프로세스가 종료될 때 동적할당한 자원들을 모두 해제해줘야 메모리 누수가 생기지 않는다. Project 2의 테스트 케이스로 Project 2 시점까지 메모리 누수가 생기지 않는다는 것을 확인했으므로 Project 3에서 새롭게 할당한 자원에 대해서 해제를 해주면 된다.
+
+앞서 설명한 `mmap`에서의 파일 맵핑 정리와 더불어 frame table, supplementary page table을 할당 해제해줘야 한다.
+
+#### process.c
+
+```c
+/* Free the current process's resources. */
+void
+process_exit (void)
+{
+  ...
+  if (pd != NULL) 
+    {
+      free_frame_table_entry_about_current_thread ();
+      free_s_page_table ();
+      ...
+    }
+}
+```
+기존의 `process_exit`에서 다음과 같은 함수들을 추가로 호출해준다.
+
+#### frame-table.c
+
+```c
+void
+free_frame_table_entry_about_current_thread ()
+{
+    lock_acquire (&frame_table_lock);
+    struct list_elem *e;
+    struct thread *t = thread_current ();
+    
+    for (e = list_begin (&frame_table); e != list_end (&frame_table);
+         e = e)
+    {
+        struct frame_table_entry *entry = 
+            list_entry (e, struct frame_table_entry, elem);   
+        e = list_next (e);
+        if(entry->thread == t)
+        {
+            clock_hand = NULL;
+            falloc_free_frame_from_frame_wo_lock (entry->kpage);
+        }
+    }
+    lock_release (&frame_table_lock);
+}
+```
+
+추가한 Frame table의 원소를 해제해주는 함수. 동시성을 위해 앞서 설명한 `frame_lock`을 걸어준 뒤, 존재하는 frame table entry 중 현재 스레드가 할당한 원소를 리스트에서 찾아 `falloc_free_frame_from_frame_wo_lock`를 실행한다. 해당 함수는 앞서 Frame table 파트에서 설명한 대로 전달받은 주소에 해당하는 frame table을 찾아 `palloc_free_page`로 해제해주는 역할을 한다.
+
+#### s-page-table.c
+
+```c
+void
+free_s_page_table (void)
+{
+    struct thread *thread = thread_current ();
+    hash_clear (&thread->s_page_table,s_page_table_hash_free_action_func);
+}
+```
+
+현재 스레드의 Supplemental page table을 할당 해제해주는 함수. S-page table은 해시맵으로 구현되어 있으므로 `hash_clear` 내장함수를 통해 테이블의 모든 원소를 삭제한다.
+
+
 ## 발전한 점
 
 ## 한계

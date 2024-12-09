@@ -898,9 +898,7 @@ sys_exit (int status)
 프로세스가 종료될 때 동적할당한 자원들을 모두 해제해줘야 메모리 누수가 생기지 않는다. Project 2의 테스트 케이스로 Project 2 시점까지 메모리 누수가 생기지 않는다는 것을 확인했으므로 Project 3에서 새롭게 할당한 자원에 대해서 해제를 해주면 된다.
 
 앞서 설명한 `mmap`에서의 파일 맵핑 정리와 더불어 frame table, supplementary page table을 할당 해제해줘야 한다.
-
 #### process.c
-
 ```c
 /* Free the current process's resources. */
 void
@@ -915,10 +913,8 @@ process_exit (void)
     }
 }
 ```
-기존의 `process_exit`에서 다음과 같은 함수들을 추가로 호출해준다.
-
+기존의 `process_exit`에서 프로세스를 종료하며 자원을 할당해제할 때 다음과 같은 함수들을 추가로 호출하여 Assn3에서 추가로 사용한 자원을 할당 해제한다.
 #### frame-table.c
-
 ```c
 void
 free_frame_table_entry_about_current_thread ()
@@ -942,11 +938,8 @@ free_frame_table_entry_about_current_thread ()
     lock_release (&frame_table_lock);
 }
 ```
-
-추가한 Frame table의 원소를 해제해주는 함수. 동시성을 위해 앞서 설명한 `frame_lock`을 걸어준 뒤, 존재하는 frame table entry 중 현재 스레드가 할당한 원소를 리스트에서 찾아 `falloc_free_frame_from_frame_wo_lock`를 실행한다. 해당 함수는 앞서 Frame table 파트에서 설명한 대로 전달받은 주소에 해당하는 frame table을 찾아 `palloc_free_page`로 해제해주는 역할을 한다.
-
+추가한 Frame table의 entry를 할당 해제해주는 함수. 동시성을 위해 앞서 설명한 `frame_table_lock`을 걸어준 뒤, `frame_table`을 순회하며 현재 스레드가 할당한 frame의 entry에 대해`falloc_free_frame_from_frame_wo_lock`를 실행하여 frame의 할당 해제, entry에 대한 할당 해제를 수행한다. 본래 프레임에 대한 할당 해제는 `pagedir_destory`에서 이루어졌으나 `pagedir_destory`에서 frame 할당 해제하는 것을 제거하고 `free_frame_table_entry_about_current_thread`에서 수행되도록 하였다.
 #### s-page-table.c
-
 ```c
 void
 free_s_page_table (void)
@@ -955,17 +948,52 @@ free_s_page_table (void)
     hash_clear (&thread->s_page_table,s_page_table_hash_free_action_func);
 }
 ```
+현재 스레드의 Supplemental page table을 할당 해제해주는 함수이다. s-page table은 해시맵으로 구현되어 있으므로 `hash_clear` 내장함수를 통해 테이블의 모든 entry를 순회하며 각 entry에 대해`s_page_table_hash_free_action_func`를 수행한다.
 
-현재 스레드의 Supplemental page table을 할당 해제해주는 함수. S-page table은 해시맵으로 구현되어 있으므로 `hash_clear` 내장함수를 통해 테이블의 모든 원소를 삭제한다.
+```c
+static void
+s_page_table_hash_free_action_func (struct hash_elem *e, void *aux)
+{
+    struct s_page_table_entry *entry = hash_entry (e, struct s_page_table_entry, elem);
+    if(entry->in_swap)
+	{
+		delete_swap_entry(entry->swap_idx);
+	}
+	
+	hash_delete (&(thread_current())->s_page_table, &entry->elem);
+	free (entry);
+}
+```
+`hash_clear`함수를 통해 `s_page_table`의 모든 entry에 대해 수행되는 함수로 각 entry가 `in_swap` 즉 해당 페이지가 swap disk에 정보를 저장하고 있다면 swap disk에서 차지하고 있는 공간을 `delete_swap_entry`을 통해 자유롭게 한다. 이후 `hash_delete`를 통해 해당 entry를 `s_page_table`에서 제거하고 entry 자체에 할당된 공간을 해제한다.
+
+```c
+bool
+delete_swap_entry (size_t swap_idx)
+{
+    block_sector_t page_start_sector_idx;
+    lock_acquire (&swap_table.lock);
+    if (!bitmap_test (swap_table.used_map, swap_idx))
+    {
+        lock_release (&swap_table.lock);
+        return false;
+    }
+
+    bitmap_set_multiple (swap_table.used_map, swap_idx, 1, false);
+    lock_release (&swap_table.lock);
+    return true;
+}
+```
+입력받은 `swap_idx`에 해당하는 Swap Disk Pool 내 비트를 free하다고 표시를 변경하는 함수이다.
 
 ## 발전한 점
 이전에는 User Stack이 1 페이지(4KB)를 넘을 수 없어 유저 스택이 많이 쌓이는 복잡한 유저 프로그램의 실행이 불가능하였다. 하지만 이제는 Stack Growth가 구현되어 복잡한 
 
 ## 한계
 File Lock의 경우 락을 점유하고 있는 스레드가 다시 락을 점유하려고 하는 경우에 대해 락을 점유하거나 해제하지 않는 예외 처리를 하여 처리해주었다. 하지만 이보다는 user 모드에서의 lock과 kernel 모드에서의 lock이 분리되거나 이 둘의 로직이 동시에 실행될 수 없다는 사실을 이용하여 새로운 synchronization 를 구현하여 개선되면 좋을 것이다. 
-현재 Frame Table은 linked list로 구현되어 원하는 frame을 찾는데 O(n)의 시간이 소모된다. 이를 evict policy를 위한 효율적인 iterator를 가지는 동시에 hash, index를 통해 효율적인 frame table entry 찾기가 가능한 자료구조로 변경하면 좋을 것이다. 
-현재 구현상 기존의 page table, page directory와 `s_page_table`은 상당수의 정보(`upage`, `kpage`,`writable` 등)가 중복된다. 이는 메모리 관리에 대한 공간 overhead를 2배 가까이 늘리는 원인이 된다. 기존의 page directory, table과 `s_page_table`의 정보를 한 테이블로 관리할 수 있다면 메모리overhead를 감소시키고 entry 조회시간도 감소시킬 수 있을 것이다. 기존의 page table entry의 flag를 위한 공간에 남는 비트가 있어 두 테이블의 정보를 합치는 것이 가능할 것으로 보인다.
 
+현재 Frame Table은 linked list로 구현되어 원하는 frame을 찾는데 O(n)의 시간이 소모된다. 이를 evict policy를 위한 효율적인 iterator를 가지는 동시에 hash, index를 통해 효율적인 frame table entry 찾기가 가능한 자료구조로 변경하면 좋을 것이다. 
+
+현재 구현상 기존의 page table, page directory와 `s_page_table`은 상당수의 정보(`upage`, `kpage`,`writable` 등)가 중복된다. 이는 메모리 관리에 대한 공간 overhead를 2배 가까이 늘리는 원인이 된다. 기존의 page directory, table과 `s_page_table`의 정보를 한 테이블로 관리할 수 있다면 메모리overhead를 감소시키고 entry 조회시간도 감소시킬 수 있을 것이다. 기존의 page table entry의 flag를 위한 공간에 남는 비트가 있어 두 테이블의 정보를 합치는 것이 가능할 것으로 보인다.
 
 또한 아쉬운 점으로 프로세스 종료 시 파일 맵핑을 해제할 때 지금까지 맵핑했던 파일 수만큼 모든 맵핑 번호를 확인하며 `munmap`을 시도하도록 간략하게 구현했다는 점이 있는데, 특정 매핑 id가 존재하는지 빠르게 확인 가능 + 삽입 및 삭제가 편하도록 `fmm_data`를 해시맵 등으로 관리했으면 더욱 효율적이었을 것이라 예상한다.
 

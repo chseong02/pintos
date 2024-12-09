@@ -436,7 +436,165 @@ s_page_table_delete_from_upage (void *upage)
 
 활용사례...
 ### 2. Lazy Loading
+Lazy Loading은 User program 파일을 프로세스/스레드 생성시 물리 메모리에 올리는 것이 아니라 실제로 실행하려고 할 때, 관련 내용이 메모리에 없어 page fault를 일으킬 때가 되어서야 해당 페이지의 프레임을 할당하고 로드함으로써 1 페이지씩 뒤늦게 메모리에 로드하는 것이다. 그렇기에 더 이상 page fault는 잘못된 메모리 접근의 의미만 가지는 것이 아니고 로드해야 하나 아직 메모리에 로드하지 않은 곳에 대한 접근 시도의 의미를 가질 수 도 있게 되었다. 그러므로 page fault handler 함수를 수정해주어야만 한다.
 
+먼저 기존에 유저 프로그램을 실행하는 스레드에서 곧바로 실행 파일 전체를 로드하는 함수(`load_segment`)를 변경하였다.
+
+```c
+static bool
+load_segment (struct file *file, off_t ofs, uint8_t *upage,
+              uint32_t read_bytes, uint32_t zero_bytes, bool writable) 
+{
+  ASSERT ((read_bytes + zero_bytes) % PGSIZE == 0);
+  ASSERT (pg_ofs (upage) == 0);
+  ASSERT (ofs % PGSIZE == 0);
+
+  file_seek (file, ofs);
+  off_t new_ofs = ofs;
+  while (read_bytes > 0 || zero_bytes > 0) 
+    {
+      /* Calculate how to fill this page.
+         We will read PAGE_READ_BYTES bytes from FILE
+         and zero the final PAGE_ZERO_BYTES bytes. */
+      size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
+      size_t page_zero_bytes = PGSIZE - page_read_bytes;
+      
+      bool success = s_page_table_file_add(upage, writable, file, new_ofs, 
+        page_read_bytes, page_zero_bytes, FAL_USER);
+      if (!success)
+      {
+        return false;
+      }
+      /* Advance. */
+      read_bytes -= page_read_bytes;
+      zero_bytes -= page_zero_bytes;
+      upage += PGSIZE;
+      new_ofs += page_read_bytes;
+    }
+  return true;
+}
+```
+기존에 loadable한 segment를 실제 memory에 load하는 함수인 `load_segment`를 실제 메모리에 load하는 대신 `s_page_table_fild_add` 함수를 통해 `s_page_table`에 supplemental page table entry만 추가하도록 변경하였다.
+`page_read_bytes`, `page_zero_bytes`는 기존 공식대로 계산하며 해당 값들을 `s_page_table_file_add`에 넘겨 추후에 실제로 load할 때 해당 정보를 바탕으로 load할 수 있도록 했다. 또한 기존에는 `file_read`를 통해 자동으로 file을 읽는 포인트가 이동하였지만 현재는 실제로 파일을 읽지 않으므로 `new_ofs`를 통해 추후 읽어야할 위치를 기록해주었다. 또한 매 순회마다 `new_ofs`에 `page_read_bytes`를 더해 `file_read`와 동일하게 파일 내 읽어야할 위치를 계산하였다. 
+```c
+static void
+page_fault (struct intr_frame *f) 
+{
+   ...
+   if(user && !check_ptr_in_user_space (fault_addr))
+      sys_exit (-1);
+   /* User caused page fault */
+   void* upage = find_page_from_uaddr (fault_addr);
+   if (!upage)
+   {
+     ...
+   }
+   if (!is_writable_page (upage) && write)
+      sys_exit (-1);
+   
+   bool success = make_page_binded (upage);
+   if (!success)
+      sys_exit (-1);
+   return;
+   ...
+}
+```
+실행 파일 내용이 있어야 할 페이지에 대해 page fault가 일어나면 이를 감지하고 실제로 frame을 할당하고 파일 내용을 load해 주어야 하므로 해당 케이스를 page fault handler에서 감지하고 처리할 수 있어야 한다. 이를 위해 page fault handler함수를 다음처럼 변경하였다.
+page fault 발생시 해당 page fault가 user의 kernel virtual address를 접근에 의한 것인지 검사한다. 그렇다면 이는 완전히 잘못된 접근이므로 `sys_exit(-1)`한다. 해당 경우가 아니라면 다음으로는 `find_page_from_uaddr (fault_addr);`을 통해 `s_page_table`에 존재하는 page 속 uaddr인지 확인한다. 만약 `s_page_table`에 존재하는 페이지에 대한 접근이라면 올바른 접근(lazy loading 또는 swap out된 page, frame이 할당된 page)이며 `find_page_from_uaddr`은 `fault_addr`가 포함된 `upage`(`s_page_table`에 엔트리가 존재하는)를 반환한다. 하지만 이 때 frame에 할당된 page라고 하더라도 read-only page에 대해 write를 시도하였다면 이는 잘못된 접근이다. 이를 `is_writable_page`를 통해 얻은 해당 page의 writable 여부와 `write`(page fault를 일으킨 접근의 write/read 여부)를 비교하여 잘못된 접근인지 검사한다. 만약 올바른 접근이였다고 판단되면 page를 `make_page_binded` 함수에 넘겨 해당 페이지가 frame을 할당 받고 의도한/예상하는 정보를 가지고 있게 만든다.
+
+```c
+void* find_page_from_uaddr (void *uaddr)
+{
+    void *upage = pg_round_down (uaddr);
+    struct s_page_table_entry *entry = find_s_page_table_entry_from_upage (upage);
+    if (!entry)
+        return NULL;
+    return entry->upage;
+}
+```
+입력받은 virtual address `uaddr`이 속한 page가 `s_page_table`에 존재하는지 검사하고 존재한다면 해당 페이지 주소를, 존재하지 않는다면 NULL을 반환하는 함수이다.
+
+
+```c
+bool is_writable_page (void *upage)
+{
+    struct s_page_table_entry *entry = find_s_page_table_entry_from_upage (upage);
+    if (!entry)
+        return false;
+    return entry->writable;
+}
+```
+`is_writable_page`는 입력 받은 `upage` page가 writable한 page인지 반환하는 함수이다. 
+우선 `find_s_page_table_entry_from_upage`를 통해 `upage` 에 대한 entry를 `s_page_table`에서 찾고 해당 entry의 `writable`을 반환한다.
+
+```c
+bool make_page_binded (void *upage)
+{
+    file_lock_acquire();
+    struct s_page_table_entry *entry = find_s_page_table_entry_from_upage (upage);
+    if (!entry)
+    {
+        file_lock_release();
+        return false;
+    }
+        
+    if (entry->in_swap)
+    {
+        ...
+    }
+    if (!entry->has_loaded)
+    {
+        // NOT FOR FILE, just Lazy loading
+        if (!entry->file)
+        {
+            file_lock_release();
+            return false;
+        }
+        // File Lazy Loading
+        
+        uint8_t *kpage = falloc_get_frame_w_upage (entry->flags, entry->upage);
+
+        if (!kpage)
+        {
+            file_lock_release();
+            return false;
+        }
+            
+        struct file *file = entry->file; 
+        off_t ofs = entry->file_ofs;
+        off_t page_read_bytes = entry->file_read_bytes;
+        off_t page_zero_bytes = entry->file_zero_bytes;
+        off_t writable = entry->writable;
+
+        // We don't have to `file_open`, because It's not closed.
+        file_seek (file, ofs);
+        /* Load this page. */
+        if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
+        {
+            falloc_free_frame_from_frame (kpage);
+            file_lock_release();
+            return false; 
+        }
+        memset (kpage + page_read_bytes, 0, page_zero_bytes);
+        /* Add the page to the process's address space. */
+        if (!install_page (upage, kpage, writable)) 
+        {
+            falloc_free_frame_from_frame (kpage);
+            file_lock_release();
+            return false; 
+        }
+        entry->has_loaded = true;
+        entry->kpage = kpage;
+        file_lock_release();
+        return true;
+    }
+    file_lock_release();
+    return false;
+}
+```
+`make_page_binded`는 입력 받은 user virtual page `upage`에 frame을 매핑하고 해당 page가 가져야하는 정보를 가질 수 있게 해주는 함수이다. Swap In, Lazy Loading의 역할을 모두 수행하고 있으며 여기에서는 lazy loading에 초점을 맞추어 설명하도록 하겠다.
+먼저 `find_s_page_table_entry_from_upage`를 통해 `upage`의 entry를 찾은 뒤 `entry->in_swap`이라면 현재 해당 페이지의 정보가 Swap Disk에 있는 것이므로 Swap In을 수행하여 메모리로 정보를 가지고 온다. 이에 해당되지 않고 `!entry->has_loaded`라면 Lazy Loading에 의해 아직 메모리에 로드되지 않았거나 이전 물리 메모리 확보를 위한 swap out 과정에서 dirty하지 않은 page의 frame을 할당 해제된(swap disk로 정보를 옮기지 않으므로 `in_swap`은 false임.) 경우이다. 이 둘은 완벽히 동일한 로직을 통해 해당 페이지가 정상적으로 가져야 할 정보를 메모리에 로드하게 된다. 먼저 `falloc_get_frame_w_upage`를 통해 `upage`에 매핑할 frame을 할당 받고 사전에 입력한 `s_page_table_entry`의 정보를 바탕으로 기존 `load_segment`의 로직을 수행한다. 우선 `ofs`로 `file`이 보는 위치를 옮긴 후, `page_read_bytes`만큼 파일에서 읽어온 뒤, `page_zero_bytes`만큼 0으로 채운다. 이후 `install_page`를 통해 page directory, page table에 upage ,kpage 매핑을 등록하고 `entry->has_loaded`를 true로, `entry->kpage`를 할당 받은 frame 주소로 두어 올바르게 load가 완료되었음을 표시한다. 
+File Read를 하지 않는 로직들에 대해서도 앞서 `file_lock_acquire`을 하는 이유는 `file_lock`과 `frame_table_lock`의 접근 순서에 따라 dead lock이 발생할 수 있는 가능성이 존재하기에 이 접근 순서를 통일하기 위함이다.
 
 ### 4. Stack Growth
 Stack growth는 핀토스 기존 구현의 1 page로 고정되어 있는 user stack을 동적으로 확장할 수 있는 기능이다. 이를 위해 lazy loading과 유사한 방식으로 구현하였다. 우선은 기존처럼 1 page의 user stack을 할당하여 사용한다. 만약 해당 범위를 넘어서 접근하려고 한다면 page fault를 발생시키게 된다. 이 때 우리는 해당 page fault가 올바른 stack에 대한 접근에 의해 발생한 page fault인지 검사하고 그렇다면 동적으로 stack을 신장한다. 
@@ -800,10 +958,14 @@ free_s_page_table (void)
 
 현재 스레드의 Supplemental page table을 할당 해제해주는 함수. S-page table은 해시맵으로 구현되어 있으므로 `hash_clear` 내장함수를 통해 테이블의 모든 원소를 삭제한다.
 
-
 ## 발전한 점
+이전에는 User Stack이 1 페이지(4KB)를 넘을 수 없어 유저 스택이 많이 쌓이는 복잡한 유저 프로그램의 실행이 불가능하였다. 하지만 이제는 Stack Growth가 구현되어 복잡한 
 
 ## 한계
+File Lock의 경우 락을 점유하고 있는 스레드가 다시 락을 점유하려고 하는 경우에 대해 락을 점유하거나 해제하지 않는 예외 처리를 하여 처리해주었다. 하지만 이보다는 user 모드에서의 lock과 kernel 모드에서의 lock이 분리되거나 이 둘의 로직이 동시에 실행될 수 없다는 사실을 이용하여 새로운 synchronization 를 구현하여 개선되면 좋을 것이다. 
+현재 Frame Table은 linked list로 구현되어 원하는 frame을 찾는데 O(n)의 시간이 소모된다. 이를 evict policy를 위한 효율적인 iterator를 가지는 동시에 hash, index를 통해 효율적인 frame table entry 찾기가 가능한 자료구조로 변경하면 좋을 것이다. 
+현재 구현상 기존의 page table, page directory와 `s_page_table`은 상당수의 정보(`upage`, `kpage`,`writable` 등)가 중복된다. 이는 메모리 관리에 대한 공간 overhead를 2배 가까이 늘리는 원인이 된다. 기존의 page directory, table과 `s_page_table`의 정보를 한 테이블로 관리할 수 있다면 메모리overhead를 감소시키고 entry 조회시간도 감소시킬 수 있을 것이다. 기존의 page table entry의 flag를 위한 공간에 남는 비트가 있어 두 테이블의 정보를 합치는 것이 가능할 것으로 보인다.
+
 
 또한 아쉬운 점으로 프로세스 종료 시 파일 맵핑을 해제할 때 지금까지 맵핑했던 파일 수만큼 모든 맵핑 번호를 확인하며 `munmap`을 시도하도록 간략하게 구현했다는 점이 있는데, 특정 매핑 id가 존재하는지 빠르게 확인 가능 + 삽입 및 삭제가 편하도록 `fmm_data`를 해시맵 등으로 관리했으면 더욱 효율적이었을 것이라 예상한다.
 

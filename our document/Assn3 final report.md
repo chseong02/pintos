@@ -439,6 +439,98 @@ s_page_table_delete_from_upage (void *upage)
 
 
 ### 4. Stack Growth
+Stack growth는 핀토스 기존 구현의 1 page로 고정되어 있는 user stack을 동적으로 확장할 수 있는 기능이다. 이를 위해 lazy loading과 유사한 방식으로 구현하였다. 우선은 기존처럼 1 page의 user stack을 할당하여 사용한다. 만약 해당 범위를 넘어서 접근하려고 한다면 page fault를 발생시키게 된다. 이 때 우리는 해당 page fault가 올바른 stack에 대한 접근에 의해 발생한 page fault인지 검사하고 그렇다면 동적으로 stack을 신장한다. 
+```c
+static void
+page_fault (struct intr_frame *f) 
+{
+   ...
+   if(user && !check_ptr_in_user_space (fault_addr))
+      sys_exit (-1);
+   /* User caused page fault */
+   void* upage = find_page_from_uaddr (fault_addr);
+   if (!upage)
+   {
+      void* esp = f->esp;
+      if (!user)
+         esp = thread_current ()->last_esp;
+         
+      if (is_valid_stack_address_heuristic (fault_addr, esp))
+      {
+         if (make_more_binded_stack_space (fault_addr))
+            return;
+      }
+      sys_exit (-1);
+   }
+   ...
+}
+```
+앞서 설명하였던 것처럼 page fault 발생시 해당 page fault가 user의 kernel virtual address를 접근에 의한 것인지 검사한다. 그렇다면 이는 완전히 잘못된 접근이므로 `sys_exit(-1)`한다. 해당 경우가 아니라면 다음으로는 `find_page_from_uaddr (fault_addr);`을 통해 `s_page_table`에 존재하는 page 속 uaddr인지 확인한다. 이를 통해 lazy loading 대상의 page인지, swap out된 page인지 등, 사전에 할당한 page(frame을 할당 받지 않은 page일 수 있다.)인지 확인한다. 만약 이 또한 아니라면 이제 stack growth를 해야하는 상황인지를 검사하게 된다.
+`user`에서 발생한 page fault라면 interrupt frame의 `esp`가 valid한 값을 가지게 된다. (user->kernel 이동시 esp 값 등록) 하지만 `kernel`에서 발생한 page fault라면  interrupt frame의 `esp`가 valid하다고 할 수 없다. kernel -> kernel 시에는 esp 값을 기록하지 않는다.
+```c
+struct thread
+  {
+  ...
+#ifdef USERPROG
+    /* Owned by userprog/process.c. */
+    uint32_t *pagedir;                  /* Page directory. */
+    struct hash s_page_table;           /* Supplemental Page Table */
+    struct process* process_ptr;
+    void* last_esp;
+#endif
+  ...
+  }
+```
+이러한 상황(kernel -> kernel)에 valid한 esp를 얻기 위해 별도로 esp를 관리해주었다. 
+`thread`에 `last_esp`를 추가하였다.
+```c
+static void
+syscall_handler (struct intr_frame *f) 
+{
+  int arg[4];
+  if (!check_ptr_in_user_space (f->esp))
+    sys_exit (-1);
+  thread_current ()->last_esp = f->esp;
+```
+page fault 발생한 것이 kernel인 경우 + user stack growth가 필요한 경우는 user process 가 system call을 호출하였을 때이다. 그러므로 syscall이 호출하여 `syscall_handler`가 호출되었을 때마다 현재 `esp` 값을 `t->last_esp`에 넣어 준다. 이로써 page fault handler에서 `kernel`에 의한 page fault 일 때도 esp를 얻을 수 있다. 이 값을 활용하여 `is_valid_stack_address_heuristic`를 통해 해당 page fault 주소가 stack growth를 필요로 하는 올바른 주소 접근인지 판별한다.
+그렇다고 판단되면 `make_more_binded_stack_space (fault_addr)`를 통해 해당 주소에 대한 page의 frame을 할당해주어 stack growth를 수행한다.
+
+```c
+bool is_valid_stack_address_heuristic (void *fault_addr, void *esp)
+{
+    return ((uint32_t) fault_addr >= (uint32_t) PHYS_BASE - (uint32_t) 0x00800000
+        && (uint32_t) fault_addr >= (uint32_t) esp - 32);
+}
+```
+page fault가 발생한 주소가 stack growth를 해주어야 하는 주소인지 판별하는 휴리스틱한 함수이다. 우선 stack의 최대 크기인 8MB를 넘지 않는지 확인한다. 이후 `push`, `pusha`에 의해 최대로 접근 가능한 `esp-32`보다는 같거나 위에서 접근한 시도인지 확인한다. 만일 `esp`를 `sub` 등을 통해 조작한 경우에도 해당 조건을 반드시 만족하게 된다. 이를 통해 휴리스틱하게 올바른 stack에 대한 접근인지, stack growth를 해야 하는 상황인지 판별 후 그 결과를 bool로 반환한다.
+디자인 계획에서는 `esp-32`의 조건만을 고려하여 잘못된 `esp` 에 대한 처리가 없었으나 구현에서 추가하였다. 또한 조건 판별을 위한 별도의 함수로 구분하였다.
+
+```c
+bool make_more_binded_stack_space (void *uaddr)
+{
+    void *upage = pg_round_down (uaddr);
+    uint8_t *kpage;
+    bool success = false;
+
+    /* PALLOC -> FALLOC */
+    kpage = falloc_get_frame_w_upage (FAL_USER | FAL_ZERO, upage);
+    if (kpage != NULL) 
+    {
+        success = install_page (upage, kpage, true) && 
+        s_page_table_binded_add (upage, kpage, true, FAL_USER | FAL_ZERO);
+        if (!success)
+        {
+            /* PALLOC -> FALLOC */
+            falloc_free_frame_from_frame (kpage);
+        }
+    }
+    return success;
+}
+```
+`stack`내 주소로 판별된 `uaddr`이 포함되는 page를 할당하고 이를 위한 frame 할당을 수행하는, 즉 stack growth를 실질적으로 수행하는 함수이다.
+`uaddr`은 반드시 `is_valid_stack_address_heuristic`를 통해 검증되었음이 가정된다. 유저 스택 공간을 위한 `FAL_USER | FAL_ZERO`옵션을 이용한 `falloc_get_frame_w_upage`를 통해 frame을 할당 받고 `install_page`를 통해 page table에 등록, `s_page_table_binded_add`를 이용하여 `s_page_table`에 frame 매핑된 page의 entry로써 추가한다. 이렇게 `s_page_table`에 등록된 page는 다른 page들과 동일하게 상황에 따라 swap out/in의 대상이 될 수 있다.
+
+위 함수들을 활용하여 Stack Growth를 구현함으로써 기존에 1 page로 고정되어 있던 User Stack은 올바른 stack 주소에 대한 page fault 발생시 동적으로 Stack 공간을 추가로 할당함으로써 Stack Growth를 수행한다.
 ### 5. File Memory Mapping
 
 #### process.h / process.c
@@ -641,7 +733,6 @@ sys_exit (int status)
 }
 ```
 프로세스가 종료될 때 맵핑된 파일들이 있다면 모두 할당 해제해줘야 하는데, 이는 `sys_exit`에서 수행한다. 현재까지 맵핑된 파일 수를 `mmap_count`에다 기록한 후 해제할 때 모든 맵핑 id를 확인하여 `munmap`해준다. 만약 이미 해제한 맵핑이라 하더라도 `sys_munmap`에서 아무 일도 일어나지 않도록 처리한다.
-
 
 ### 6. Swap Table
 ### 7. On Process Termination
